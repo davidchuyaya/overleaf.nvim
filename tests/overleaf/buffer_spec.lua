@@ -51,16 +51,23 @@ describe('buffer', function()
       vim.api.nvim_buf_set_name(restored, '/tmp/overleaf-cleanup/project/restored.tex')
       local unrelated = vim.api.nvim_create_buf(true, false)
       vim.api.nvim_buf_set_name(unrelated, '/tmp/unrelated.tex')
+      local modified = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(modified, '/tmp/overleaf-cleanup/project/unsaved.tex')
+      vim.api.nvim_buf_set_lines(modified, 0, -1, false, { 'unsaved' })
+      vim.bo[modified].modified = true
       local documents = { tracked = { bufnr = tracked } }
 
-      local count = buffer.cleanup_all(documents, '/tmp/overleaf-cleanup')
+      local count, skipped = buffer.cleanup_all(documents, '/tmp/overleaf-cleanup')
 
       assert.are.equal(2, count)
+      assert.are.equal(1, skipped)
       assert.is_nil(documents.tracked.bufnr)
       assert.is_false(vim.api.nvim_buf_is_valid(tracked))
       assert.is_false(vim.api.nvim_buf_is_valid(restored))
       assert.is_true(vim.api.nvim_buf_is_valid(unrelated))
+      assert.is_true(vim.api.nvim_buf_is_valid(modified))
       vim.api.nvim_buf_delete(unrelated, { force = true })
+      vim.api.nvim_buf_delete(modified, { force = true })
     end)
   end)
 

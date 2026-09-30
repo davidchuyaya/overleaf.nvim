@@ -348,9 +348,11 @@ end
 ---@param documents table<string, table> currently tracked documents
 ---@param sync_root? string configured sync directory (the parent of project mirrors)
 ---@return integer count number of buffers wiped
+---@return integer skipped number of modified, untracked mirror buffers preserved
 function M.cleanup_all(documents, sync_root)
   local cleaned = {}
   local count = 0
+  local skipped = 0
 
   local function wipe(bufnr)
     if not bufnr or cleaned[bufnr] or not vim.api.nvim_buf_is_valid(bufnr) then return end
@@ -371,11 +373,17 @@ function M.cleanup_all(documents, sync_root)
       local name = vim.api.nvim_buf_get_name(bufnr)
       local normalized = name ~= '' and vim.fs.normalize(name) or ''
       local in_sync_root = root and (normalized == root or normalized:sub(1, #root + 1) == root .. '/')
-      if name:match('^overleaf://') or in_sync_root then wipe(bufnr) end
+      if name:match('^overleaf://') or in_sync_root then
+        if vim.bo[bufnr].modified then
+          skipped = skipped + 1
+        else
+          wipe(bufnr)
+        end
+      end
     end
   end
 
-  return count
+  return count, skipped
 end
 
 return M

@@ -1554,7 +1554,10 @@ function M.flush_all(timeout_ms)
 end
 
 function M._finish_exit_cleanup()
-  buffer.cleanup_all(M._state.documents, config.get().sync_dir)
+  local _, skipped = buffer.cleanup_all(M._state.documents, config.get().sync_dir)
+  if skipped > 0 then
+    config.log('error', 'Kept %d modified, disconnected Overleaf mirror buffer(s) to avoid data loss', skipped)
+  end
   M._exit_cleanup_pending = false
 end
 
