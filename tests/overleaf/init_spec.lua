@@ -9,8 +9,13 @@ describe('overleaf shutdown', function()
     local overleaf = require('overleaf')
     local sync = require('overleaf.sync')
     local sync_root = vim.fn.tempname()
-    overleaf.setup({ keys = false, sync_dir = sync_root })
+    overleaf.setup({ keys = false, sync_dir = sync_root, reopen_pdf_on_compile = false })
     sync.start('project')
+
+    overleaf._state.pdf_path = nil
+    assert.is_true(overleaf._should_open_pdf('/tmp/output.pdf'))
+    assert.is_false(overleaf._should_open_pdf('/tmp/output.pdf'))
+    assert.is_true(overleaf._should_open_pdf('/tmp/other-output.pdf'))
 
     local bufnr = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_buf_set_name(bufnr, sync._sync_dir .. '/main.tex')

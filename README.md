@@ -100,6 +100,7 @@ To get the cookie manually: open overleaf.com in your browser → DevTools (F12)
 | `:Overleaf connect` | Connect to Overleaf |
 | `:Overleaf disconnect` | Disconnect |
 | `:Overleaf compile` | Compile LaTeX project |
+| `:Overleaf pdf` | Reopen the most recently compiled PDF |
 | `:Overleaf tree` | Toggle file tree |
 | `:Overleaf open` | Open a document |
 | `:Overleaf projects` | Switch project |
@@ -162,6 +163,11 @@ require('overleaf').setup({
   -- Compile whenever an Overleaf buffer is written (default: true)
   -- Disable this when an auto-save plugin causes repeated compilations.
   compile_on_write = true,
+
+  -- Relaunch the PDF viewer after every compile (default: true).
+  -- Set false to let an already-open viewer reload in place and retain its page.
+  -- Use :Overleaf pdf if you close it and want to reopen it manually.
+  reopen_pdf_on_compile = true,
 
   -- File tree implementation: 'native' or 'neo-tree' (default: 'native')
   -- Neo-tree requires sync_dir so it has a local project directory to show.
