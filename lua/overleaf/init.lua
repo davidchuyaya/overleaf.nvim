@@ -75,11 +75,23 @@ M._state = {
 function M.setup(opts)
   config.setup(opts)
   setup_exit_hooks()
+  require('overleaf.dependencies').setup()
+
+  if config.get().tree_provider == 'neo-tree' then
+    require('overleaf.neo_tree').setup()
+    local explorer_key = config.get().explorer_key
+    if explorer_key then
+      vim.keymap.set('n', explorer_key, function() M.toggle_explorer() end, { desc = 'Toggle Explorer' })
+    end
+  end
 
   -- Default keymaps (prefix: <leader>o for Overleaf)
-  local keys = opts and opts.keys or true
+  local keys = not opts or opts.keys ~= false
   if keys then
     local map = vim.keymap.set
+    -- Remove an exact mapping on the prefix (AstroNvim uses it for Neo-tree),
+    -- otherwise a slow <leader>o sequence invokes that shorter mapping.
+    pcall(vim.keymap.del, 'n', '<leader>o')
     map('n', '<leader>oc', function() M.connect() end, { desc = 'Overleaf: Connect' })
     map('n', '<leader>od', function() M.disconnect() end, { desc = 'Overleaf: Disconnect' })
     map('n', '<leader>ob', function() M.compile() end, { desc = 'Overleaf: Build (compile)' })
@@ -692,10 +704,22 @@ function M.toggle_tree(force_open)
         position = 'left',
         dir = sync._sync_dir,
       })
+      vim.schedule(function() require('overleaf.neo_tree').attach_open_trees() end)
       return
     end
   end
   require('overleaf.tree').toggle()
+end
+
+--- Use the normal Neo-tree explorer unless an Overleaf project is connected.
+function M.toggle_explorer()
+  if M._state.connected and sync._sync_dir then
+    M.toggle_tree()
+    return
+  end
+
+  local ok = pcall(vim.cmd, 'Neotree toggle')
+  if not ok then config.log('warn', 'Neo-tree is unavailable') end
 end
 
 function M.preview_file()

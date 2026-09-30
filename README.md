@@ -170,6 +170,14 @@ require('overleaf').setup({
   -- Neo-tree requires sync_dir so it has a local project directory to show.
   tree_provider = 'native',
 
+  -- With the Neo-tree provider, use this explorer key for the Overleaf tree
+  -- while connected and the normal working-directory tree otherwise.
+  explorer_key = '<leader>e',
+
+  -- Ask Mason to install TexLab when Mason is available (default: true).
+  -- Set this to false if TexLab is managed elsewhere.
+  ensure_texlab = true,
+
   -- Log level: 'debug', 'info', 'warn', 'error' (default: 'info')
   log_level = 'info',
 
@@ -184,9 +192,12 @@ require('overleaf').setup({
 
 With both `sync_dir` and `tree_provider = 'neo-tree'`, the Overleaf tree uses
 Neo-tree's filesystem view. Document opens are routed back through Overleaf's
-live OT buffers. The open-document and project-search commands use Snacks when
-it is available, so `<leader>oo` opens the file picker and `<leader>of` opens
-live grep scoped to the connected project.
+live OT buffers, and mirror-changing operations are blocked in favor of the
+plugin's remote file commands. `explorer_key` opens the Overleaf-scoped tree
+while connected and the normal working-directory explorer otherwise. The
+open-document and project-search commands use Snacks when it is available, so
+`<leader>oo` opens the file picker and `<leader>of` opens live grep scoped to
+the connected project.
 
 ## Workflow
 

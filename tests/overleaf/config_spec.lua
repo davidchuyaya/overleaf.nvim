@@ -22,6 +22,13 @@ describe('config', function()
 
     it('uses the native file tree by default', function() assert.are.equal('native', config.get().tree_provider) end)
 
+    it(
+      'uses the normal explorer shortcut for Neo-tree',
+      function() assert.are.equal('<leader>e', config.get().explorer_key) end
+    )
+
+    it('asks Mason to install TexLab by default', function() assert.is_true(config.get().ensure_texlab) end)
+
     it('has log_level defaulting to info', function() assert.are.equal('info', config.get().log_level) end)
   end)
 
@@ -44,6 +51,11 @@ describe('config', function()
     it('can use Neo-tree as the file tree', function()
       config.setup({ tree_provider = 'neo-tree' })
       assert.are.equal('neo-tree', config.get().tree_provider)
+    end)
+
+    it('can disable TexLab provisioning', function()
+      config.setup({ ensure_texlab = false })
+      assert.is_false(config.get().ensure_texlab)
     end)
 
     it('preserves unset fields', function()

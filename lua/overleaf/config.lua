@@ -9,6 +9,8 @@ M._config = {
   pdf_dir = nil, -- PDF output directory (nil = system temp dir)
   compile_on_write = true, -- Compile when an Overleaf buffer is written
   tree_provider = 'native', -- File tree: 'native' or 'neo-tree'
+  explorer_key = '<leader>e', -- Neo-tree shortcut, scoped to Overleaf while connected
+  ensure_texlab = true, -- Install TexLab through Mason when Mason is available
   sync_dir = nil, -- Local file sync directory (nil = disabled; enables external tool integration)
   log_level = 'info', -- 'debug', 'info', 'warn', 'error'
 }
