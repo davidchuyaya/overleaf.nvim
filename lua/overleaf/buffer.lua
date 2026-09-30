@@ -107,6 +107,7 @@ function M._attach_lsp(bufnr, ft)
 
   -- LSP language IDs differ from Neovim filetypes
   local lang_id_map = { tex = 'latex', bib = 'bibtex' }
+  local root_dir = require('overleaf.sync')._sync_dir or vim.fn.getcwd()
 
   local servers = {}
   if ft == 'tex' or ft == 'bib' then
@@ -144,7 +145,7 @@ function M._attach_lsp(bufnr, ft)
       pcall(vim.lsp.start, {
         name = srv.name,
         cmd = srv.cmd,
-        root_dir = vim.fn.getcwd(),
+        root_dir = root_dir,
         settings = srv.settings,
         get_language_id = function(_, filetype) return lang_id_map[filetype] or filetype end,
       }, { bufnr = bufnr })
