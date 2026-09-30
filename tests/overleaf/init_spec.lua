@@ -17,6 +17,9 @@ describe('overleaf shutdown', function()
     assert.is_false(overleaf._should_open_pdf('/tmp/output.pdf'))
     assert.is_true(overleaf._should_open_pdf('/tmp/other-output.pdf'))
 
+    require('overleaf.config').setup({ pdf_viewer = 'skim' })
+    assert.are.same({ 'open', '-a', 'Skim', '/tmp/output.pdf' }, overleaf._viewer_command('/tmp/output.pdf'))
+
     local bufnr = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_buf_set_name(bufnr, sync._sync_dir .. '/main.tex')
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'new content' })

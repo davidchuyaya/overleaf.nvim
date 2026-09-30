@@ -42,26 +42,26 @@ local function setup_exit_hooks()
   end
 end
 
---- Open a file with the configured viewer or platform default
+--- Build the command used to open a PDF or other downloaded file.
 ---@param file_path string
-local function open_file(file_path)
+---@return string[]
+function M._viewer_command(file_path)
   local viewer = config.get().pdf_viewer
-  if viewer then
-    -- User-configured viewer: run as background job to avoid disrupting cursor/window layout
-    vim.fn.jobstart({ viewer, file_path }, { detach = true })
-  else
-    -- Auto-detect platform launcher (runs in background)
-    local cmd
-    if vim.fn.has('mac') == 1 then
-      cmd = { 'open', file_path }
-    elseif vim.fn.has('wsl') == 1 then
-      cmd = { 'wslview', file_path }
-    else
-      cmd = { 'xdg-open', file_path }
-    end
-    vim.fn.system(cmd)
+  if type(viewer) == 'table' then
+    local cmd = vim.deepcopy(viewer)
+    table.insert(cmd, file_path)
+    return cmd
   end
+  if type(viewer) == 'string' and viewer:lower() == 'skim' then return { 'open', '-a', 'Skim', file_path } end
+  if viewer then return { viewer, file_path } end
+  if vim.fn.has('mac') == 1 then return { 'open', file_path } end
+  if vim.fn.has('wsl') == 1 then return { 'wslview', file_path } end
+  return { 'xdg-open', file_path }
 end
+
+--- Open a file with the configured viewer or platform default.
+---@param file_path string
+local function open_file(file_path) vim.fn.jobstart(M._viewer_command(file_path), { detach = true }) end
 
 M._state = {
   connected = false,

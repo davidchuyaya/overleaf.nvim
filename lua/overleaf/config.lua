@@ -5,7 +5,7 @@ M._config = {
   cookie = nil,
   node_path = 'node',
   base_url = 'https://www.overleaf.com', -- Overleaf instance URL (for self-hosted)
-  pdf_viewer = nil, -- PDF viewer command (nil = auto-detect: 'open' on macOS, 'xdg-open' on Linux)
+  pdf_viewer = nil, -- Viewer command; use 'skim' for the macOS Skim app
   pdf_dir = nil, -- PDF output directory (nil = system temp dir)
   reopen_pdf_on_compile = true, -- Relaunch the PDF viewer after every successful compile
   compile_on_write = true, -- Compile when an Overleaf buffer is written

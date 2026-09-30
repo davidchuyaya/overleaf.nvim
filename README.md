@@ -160,6 +160,9 @@ require('overleaf').setup({
   -- Path to Node.js binary (default: 'node')
   node_path = 'node',
 
+  -- PDF viewer executable, or 'skim' to launch the macOS Skim app.
+  pdf_viewer = 'skim',
+
   -- Compile whenever an Overleaf buffer is written (default: true)
   -- Disable this when an auto-save plugin causes repeated compilations.
   compile_on_write = true,
