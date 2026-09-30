@@ -194,7 +194,7 @@ function M._on_file_changed(path, doc)
   -- No change
   if new_content == doc.content then return end
 
-  config.log('info', 'External change: %s', doc.path)
+  config.log('debug', 'External change: %s', doc.path)
 
   if doc.joined and doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr) then
     -- Doc is open in Neovim: replace buffer content (triggers on_bytes → OT)
@@ -239,7 +239,7 @@ function M._sync_closed_doc(doc, new_content)
       if ot_err then
         config.log('error', 'Sync OT failed for %s: %s', doc.path, ot_err.message)
       else
-        config.log('info', 'Synced external change: %s', doc.path)
+        config.log('debug', 'Synced external change: %s', doc.path)
         -- Update doc state
         doc.content = new_content
         doc.server_content = new_content
