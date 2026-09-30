@@ -86,6 +86,11 @@ function M.create(doc, lines)
       config.log('info', 'Attaching LSP for ft=%s bufnr=%d', ft_map[ext], bufnr)
       M._attach_lsp(bufnr, ft_map[ext])
 
+      -- AstroNvim's deferred file initialization can reset this for buffers
+      -- backed by a real sync path. Reassert it after those hooks so :write
+      -- continues through BufWriteCmd instead of writing the mirror directly.
+      vim.bo[bufnr].buftype = 'acwrite'
+
       -- Run chktex linter for tex files
       if ft_map[ext] == 'tex' then
         M._run_chktex(bufnr)
