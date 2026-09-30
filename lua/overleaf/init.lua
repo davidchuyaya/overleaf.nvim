@@ -600,8 +600,11 @@ end
 local function snacks_confirm(picker, item)
   if item then
     local file_path = require('snacks.picker.util').path(item)
-    if file_path and M.open_synced_file(file_path, item.pos) then
+    local doc_path = file_path and sync.parse_buf_name(vim.fs.normalize(file_path)) or nil
+    local entry = doc_path and project.get_doc_by_path(doc_path) or nil
+    if entry and entry.type == 'doc' then
       picker:close()
+      vim.schedule(function() M.open_synced_file(file_path, item.pos) end)
       return
     end
   end
