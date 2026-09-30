@@ -8,7 +8,8 @@ local M = {}
 M._sync_dir = nil
 M._watchers = {} -- path -> {handle, doc_id}
 M._write_timers = {} -- doc_id -> timer
-M._writing = {} -- path -> true (suppress watcher during our writes)
+M._writing = {} -- path -> write token (suppress watcher during our writes)
+M._self_writes = {} -- path -> {content, token}, catches delayed filesystem events
 
 --- Start sync for a project. Creates the sync directory.
 ---@param project_name string
@@ -40,6 +41,8 @@ function M.stop()
     vim.fn.timer_stop(timer)
   end
   M._write_timers = {}
+  M._writing = {}
+  M._self_writes = {}
 
   M._sync_dir = nil
 end
@@ -84,17 +87,28 @@ function M.write_doc(doc)
   local dir = vim.fn.fnamemodify(path, ':h')
   vim.fn.mkdir(dir, 'p')
 
-  -- Set writing flag to suppress watcher
-  M._writing[path] = true
+  -- Mark this generation before writing so immediate watcher events are cheap
+  -- to suppress. The content marker below also catches events delivered after
+  -- the short writing window has elapsed.
+  local token = {}
+  local content = doc.content
+  M._writing[path] = token
 
   local f = io.open(path, 'w')
   if f then
-    f:write(doc.content)
+    f:write(content)
     f:close()
+    M._self_writes[path] = { content = content, token = token }
+    vim.defer_fn(function()
+      local own = M._self_writes[path]
+      if own and own.token == token then M._self_writes[path] = nil end
+    end, 5000)
   end
 
   -- Clear writing flag after watcher event has passed
-  vim.defer_fn(function() M._writing[path] = nil end, 300)
+  vim.defer_fn(function()
+    if M._writing[path] == token then M._writing[path] = nil end
+  end, 300)
 end
 
 --- Schedule a debounced write to disk (call after content changes)
@@ -129,13 +143,17 @@ function M.watch(doc)
   local handle = vim.uv.new_fs_event()
   if not handle then return end
 
-  M._watchers[path] = { handle = handle, doc_id = doc.doc_id }
+  local watcher = { handle = handle, doc_id = doc.doc_id }
+  M._watchers[path] = watcher
 
   handle:start(path, {}, function(err, _, _)
     if err then return end
+    if M._watchers[path] ~= watcher then return end
     if M._writing[path] then return end
 
-    vim.schedule(function() M._on_file_changed(path, doc) end)
+    vim.schedule(function()
+      if M._watchers[path] == watcher then M._on_file_changed(path, doc) end
+    end)
   end)
 end
 
@@ -163,6 +181,15 @@ function M._on_file_changed(path, doc)
   if not f then return end
   local new_content = f:read('*a')
   f:close()
+
+  -- A filesystem notification can arrive well after write_doc() completed.
+  -- Compare contents so our own older mirror write is never mistaken for an
+  -- external edit and synced back over newer in-memory text.
+  local own = M._self_writes[path]
+  if own then
+    if new_content == own.content then return end
+    M._self_writes[path] = nil
+  end
 
   -- No change
   if new_content == doc.content then return end
