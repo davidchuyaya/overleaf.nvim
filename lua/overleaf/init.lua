@@ -69,7 +69,6 @@ M._state = {
   project_id = nil,
   project_data = nil,
   csrf_token = nil,
-  pdf_path = nil,
   documents = {}, -- doc_id -> Document
 }
 
@@ -212,7 +211,6 @@ function M._connect_project(cookie, project_id, project_name)
     M._state.project_id = project_id
     M._state.project_name = project_name
     M._state.project_data = result.project
-    M._state.pdf_path = nil
 
     -- Parse project tree
     project.parse_project_tree(result.project)
@@ -1153,33 +1151,8 @@ function M._open_pdf(output_files)
       config.log('error', 'PDF download failed: %s', err.message)
       return
     end
-    vim.schedule(function()
-      if M._should_open_pdf(result.path) then
-        open_file(result.path)
-      else
-        config.log('info', 'PDF updated without reopening the viewer')
-      end
-    end)
+    vim.schedule(function() open_file(result.path) end)
   end)
-end
-
---- Track the downloaded PDF and decide whether compilation should relaunch it.
----@param file_path string
----@return boolean
-function M._should_open_pdf(file_path)
-  local normalized = vim.fs.normalize(file_path)
-  local previous = M._state.pdf_path
-  M._state.pdf_path = normalized
-  return config.get().reopen_pdf_on_compile or not previous or previous ~= normalized
-end
-
-function M.view_pdf()
-  local file_path = M._state.pdf_path
-  if not file_path or vim.fn.filereadable(file_path) ~= 1 then
-    config.log('warn', 'No compiled PDF available. Run :Overleaf compile first.')
-    return
-  end
-  open_file(file_path)
 end
 
 function M._parse_compile_log(log_text)
@@ -1630,7 +1603,6 @@ function M.disconnect()
   M._state.project_id = nil
   M._state.project_data = nil
   M._state.csrf_token = nil
-  M._state.pdf_path = nil
 
   config.log('info', 'Disconnected')
 end

@@ -7,7 +7,6 @@ M._config = {
   base_url = 'https://www.overleaf.com', -- Overleaf instance URL (for self-hosted)
   pdf_viewer = nil, -- Viewer command; use 'skim' for the macOS Skim app
   pdf_dir = nil, -- PDF output directory (nil = system temp dir)
-  reopen_pdf_on_compile = true, -- Relaunch the PDF viewer after every successful compile
   compile_on_write = true, -- Compile when an Overleaf buffer is written
   tree_provider = 'native', -- File tree: 'native' or 'neo-tree'
   sync_dir = nil, -- Local file sync directory (nil = disabled; enables external tool integration)

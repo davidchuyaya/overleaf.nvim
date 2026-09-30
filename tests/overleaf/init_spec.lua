@@ -9,13 +9,8 @@ describe('overleaf shutdown', function()
     local overleaf = require('overleaf')
     local sync = require('overleaf.sync')
     local sync_root = vim.fn.tempname()
-    overleaf.setup({ keys = false, sync_dir = sync_root, reopen_pdf_on_compile = false })
+    overleaf.setup({ keys = false, sync_dir = sync_root })
     sync.start('project')
-
-    overleaf._state.pdf_path = nil
-    assert.is_true(overleaf._should_open_pdf('/tmp/output.pdf'))
-    assert.is_false(overleaf._should_open_pdf('/tmp/output.pdf'))
-    assert.is_true(overleaf._should_open_pdf('/tmp/other-output.pdf'))
 
     require('overleaf.config').setup({ pdf_viewer = 'skim' })
     assert.are.same({ 'open', '-a', 'Skim', '/tmp/output.pdf' }, overleaf._viewer_command('/tmp/output.pdf'))

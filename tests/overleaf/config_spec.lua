@@ -16,8 +16,6 @@ describe('config', function()
 
     it('has pdf_viewer defaulting to nil', function() assert.is_nil(config.get().pdf_viewer) end)
 
-    it('reopens the PDF on compile by default', function() assert.is_true(config.get().reopen_pdf_on_compile) end)
-
     it('has node_path defaulting to node', function() assert.are.equal('node', config.get().node_path) end)
 
     it('compiles on write by default', function() assert.is_true(config.get().compile_on_write) end)
@@ -36,11 +34,6 @@ describe('config', function()
     it('overrides pdf_viewer', function()
       config.setup({ pdf_viewer = 'zathura' })
       assert.are.equal('zathura', config.get().pdf_viewer)
-    end)
-
-    it('can keep an existing PDF viewer open across compiles', function()
-      config.setup({ reopen_pdf_on_compile = false })
-      assert.is_false(config.get().reopen_pdf_on_compile)
     end)
 
     it('can disable compilation on write', function()

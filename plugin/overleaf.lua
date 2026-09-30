@@ -3,7 +3,6 @@ local subcommands = {
   connect = function() require('overleaf').connect() end,
   disconnect = function() require('overleaf').disconnect() end,
   compile = function() require('overleaf').compile() end,
-  pdf = function() require('overleaf').view_pdf() end,
   tree = function() require('overleaf').toggle_tree() end,
   open = function(args) require('overleaf').open_document(args) end,
   projects = function() require('overleaf').select_project() end,
