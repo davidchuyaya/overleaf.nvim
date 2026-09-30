@@ -20,6 +20,8 @@ describe('config', function()
 
     it('compiles on write by default', function() assert.is_true(config.get().compile_on_write) end)
 
+    it('uses the native file tree by default', function() assert.are.equal('native', config.get().tree_provider) end)
+
     it('has log_level defaulting to info', function() assert.are.equal('info', config.get().log_level) end)
   end)
 
@@ -37,6 +39,11 @@ describe('config', function()
     it('can disable compilation on write', function()
       config.setup({ compile_on_write = false })
       assert.is_false(config.get().compile_on_write)
+    end)
+
+    it('can use Neo-tree as the file tree', function()
+      config.setup({ tree_provider = 'neo-tree' })
+      assert.are.equal('neo-tree', config.get().tree_provider)
     end)
 
     it('preserves unset fields', function()

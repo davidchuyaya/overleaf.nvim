@@ -189,7 +189,7 @@ function M._connect_project(cookie, project_id, project_name)
     sync.sync_all(M._state, project._project_tree)
 
     -- Show tree immediately
-    vim.schedule(function() require('overleaf.tree').toggle() end)
+    vim.schedule(function() M.toggle_tree(true) end)
   end)
 end
 
@@ -515,7 +515,7 @@ function M._rejoin_documents()
   end
 end
 
-function M.open_document(doc_id_or_path, doc_path)
+function M.open_document(doc_id_or_path, doc_path, on_open)
   local doc_id = doc_id_or_path
   local path = doc_path
 
@@ -536,6 +536,7 @@ function M.open_document(doc_id_or_path, doc_path)
     local existing = M._state.documents[doc_id]
     if existing.bufnr and vim.api.nvim_buf_is_valid(existing.bufnr) then
       vim.api.nvim_set_current_buf(existing.bufnr)
+      if on_open then on_open(existing) end
       return
     end
   end
@@ -551,6 +552,8 @@ function M.open_document(doc_id_or_path, doc_path)
 
     buffer.create(doc, lines)
 
+    if on_open then on_open(doc) end
+
     -- Write to sync dir and start watching for external changes
     sync.write_doc(doc)
     sync.watch(doc)
@@ -564,6 +567,45 @@ function M.open_document(doc_id_or_path, doc_path)
       end)
     end
   end)
+end
+
+--- Open a synchronized project document selected by an external UI.
+--- Returns false for paths that do not belong to a connected text document.
+---@param file_path string
+---@param pos? integer[] {line, zero-based column}
+---@return boolean
+function M.open_synced_file(file_path, pos)
+  if not M._state.connected or not sync._sync_dir then return false end
+
+  local doc_path = sync.parse_buf_name(vim.fs.normalize(file_path))
+  local entry = doc_path and project.get_doc_by_path(doc_path) or nil
+  if not entry or entry.type ~= 'doc' then return false end
+
+  M.open_document(entry.id, entry.path, function(doc)
+    if not pos or not doc.bufnr or not vim.api.nvim_buf_is_valid(doc.bufnr) then return end
+    local win = vim.fn.bufwinid(doc.bufnr)
+    if win == -1 then return end
+    local line_count = vim.api.nvim_buf_line_count(doc.bufnr)
+    local line = math.max(1, math.min(pos[1] or 1, line_count))
+    local text = vim.api.nvim_buf_get_lines(doc.bufnr, line - 1, line, false)[1] or ''
+    local col = math.max(0, math.min(pos[2] or 0, #text))
+    pcall(vim.api.nvim_win_set_cursor, win, { line, col })
+    vim.api.nvim_set_current_win(win)
+    vim.cmd('normal! zvzz')
+  end)
+
+  return true
+end
+
+local function snacks_confirm(picker, item)
+  if item then
+    local file_path = require('snacks.picker.util').path(item)
+    if file_path and M.open_synced_file(file_path, item.pos) then
+      picker:close()
+      return
+    end
+  end
+  require('snacks.picker.actions').confirm(picker, item)
 end
 
 function M.select_project()
@@ -584,13 +626,35 @@ function M.select_document()
     return
   end
 
-  project.select_document(function(doc_id, doc_path) M.open_document(doc_id, doc_path) end)
+  local has_snacks, snacks = pcall(require, 'snacks')
+  if sync._sync_dir and has_snacks and snacks.picker then
+    snacks.picker.files({
+      cwd = sync._sync_dir,
+      title = 'Overleaf Files',
+      confirm = snacks_confirm,
+    })
+  else
+    project.select_document(function(doc_id, doc_path) M.open_document(doc_id, doc_path) end)
+  end
 end
 
-function M.toggle_tree()
+function M.toggle_tree(force_open)
   if not M._state.connected then
     config.log('warn', 'Not connected. Run :OverleafConnect first.')
     return
+  end
+  if config.get().tree_provider == 'neo-tree' and sync._sync_dir then
+    local ok, command = pcall(require, 'neo-tree.command')
+    if ok then
+      command.execute({
+        action = 'focus',
+        toggle = not force_open,
+        source = 'filesystem',
+        position = 'left',
+        dir = sync._sync_dir,
+      })
+      return
+    end
   end
   require('overleaf.tree').toggle()
 end
@@ -768,6 +832,16 @@ end
 function M.search(pattern)
   if not M._state.connected then
     config.log('warn', 'Not connected.')
+    return
+  end
+
+  local has_snacks, snacks = pcall(require, 'snacks')
+  if not pattern and sync._sync_dir and has_snacks and snacks.picker and vim.fn.executable('rg') == 1 then
+    snacks.picker.grep({
+      cwd = sync._sync_dir,
+      title = 'Overleaf Grep',
+      confirm = snacks_confirm,
+    })
     return
   end
 

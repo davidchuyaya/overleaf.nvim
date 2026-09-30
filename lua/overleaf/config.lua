@@ -8,6 +8,7 @@ M._config = {
   pdf_viewer = nil, -- PDF viewer command (nil = auto-detect: 'open' on macOS, 'xdg-open' on Linux)
   pdf_dir = nil, -- PDF output directory (nil = system temp dir)
   compile_on_write = true, -- Compile when an Overleaf buffer is written
+  tree_provider = 'native', -- File tree: 'native' or 'neo-tree'
   sync_dir = nil, -- Local file sync directory (nil = disabled; enables external tool integration)
   log_level = 'info', -- 'debug', 'info', 'warn', 'error'
 }

@@ -162,6 +162,10 @@ require('overleaf').setup({
   -- Disable this when an auto-save plugin causes repeated compilations.
   compile_on_write = true,
 
+  -- File tree implementation: 'native' or 'neo-tree' (default: 'native')
+  -- Neo-tree requires sync_dir so it has a local project directory to show.
+  tree_provider = 'native',
+
   -- Log level: 'debug', 'info', 'warn', 'error' (default: 'info')
   log_level = 'info',
 
@@ -173,6 +177,12 @@ require('overleaf').setup({
   keys = true,
 })
 ```
+
+With both `sync_dir` and `tree_provider = 'neo-tree'`, the Overleaf tree uses
+Neo-tree's filesystem view. Document opens are routed back through Overleaf's
+live OT buffers. The open-document and project-search commands use Snacks when
+it is available, so `<leader>oo` opens the file picker and `<leader>of` opens
+live grep scoped to the connected project.
 
 ## Workflow
 
