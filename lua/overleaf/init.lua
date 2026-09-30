@@ -1025,14 +1025,17 @@ function M._open_pdf(output_files)
   end
   if not pdf_file or not pdf_file.url then return end
 
+  local pdf_url = pdf_file.url
+  if not pdf_url:match('^https?://') then pdf_url = config.get().base_url .. pdf_url end
+
   bridge.request('downloadUrl', {
     cookie = config.get().cookie,
-    url = config.get().base_url .. pdf_file.url,
+    url = pdf_url,
     fileName = (M._state.project_name or 'output') .. '.pdf',
     outputDir = config.get().pdf_dir,
   }, function(err, result)
     if err then
-      config.log('debug', 'PDF download failed: %s', err.message)
+      config.log('error', 'PDF download failed: %s', err.message)
       return
     end
     vim.schedule(function() open_file(result.path) end)

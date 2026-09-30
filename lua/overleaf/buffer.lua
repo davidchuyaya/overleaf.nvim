@@ -31,12 +31,13 @@ function M.create(doc, lines)
 
   doc.bufnr = bufnr
 
-  -- :w clears modified flag and triggers compile (changes are already synced via OT)
+  -- :w clears the modified flag; compilation on write is optional because
+  -- auto-save plugins can otherwise trigger it repeatedly while editing.
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     buffer = bufnr,
     callback = function()
       vim.bo[bufnr].modified = false
-      require('overleaf').compile()
+      if config.get().compile_on_write then require('overleaf').compile() end
     end,
   })
 

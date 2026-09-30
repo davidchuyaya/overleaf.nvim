@@ -18,6 +18,8 @@ describe('config', function()
 
     it('has node_path defaulting to node', function() assert.are.equal('node', config.get().node_path) end)
 
+    it('compiles on write by default', function() assert.is_true(config.get().compile_on_write) end)
+
     it('has log_level defaulting to info', function() assert.are.equal('info', config.get().log_level) end)
   end)
 
@@ -30,6 +32,11 @@ describe('config', function()
     it('overrides pdf_viewer', function()
       config.setup({ pdf_viewer = 'zathura' })
       assert.are.equal('zathura', config.get().pdf_viewer)
+    end)
+
+    it('can disable compilation on write', function()
+      config.setup({ compile_on_write = false })
+      assert.is_false(config.get().compile_on_write)
     end)
 
     it('preserves unset fields', function()

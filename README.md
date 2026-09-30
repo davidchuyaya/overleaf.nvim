@@ -158,6 +158,10 @@ require('overleaf').setup({
   -- Path to Node.js binary (default: 'node')
   node_path = 'node',
 
+  -- Compile whenever an Overleaf buffer is written (default: true)
+  -- Disable this when an auto-save plugin causes repeated compilations.
+  compile_on_write = true,
+
   -- Log level: 'debug', 'info', 'warn', 'error' (default: 'info')
   log_level = 'info',
 

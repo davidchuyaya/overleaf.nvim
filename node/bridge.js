@@ -115,16 +115,32 @@ const handlers = {
 
     const parsed = JSON.parse(compileRes.body);
 
+    // Build artifacts are served by a specific CLSI worker. Overleaf requires
+    // the worker id and compile group on every artifact request.
+    const outputFiles = (parsed.outputFiles || []).map((file) => {
+      let rawUrl;
+      if (file.build && parsed.pdfDownloadDomain) {
+        rawUrl = parsed.pdfDownloadDomain.replace(/\/$/, '') + '/' + file.url.replace(/^\//, '');
+      } else {
+        rawUrl = new URL(file.url, BASE_URL).toString();
+      }
+
+      const outputUrl = new URL(rawUrl);
+      if (parsed.compileGroup) outputUrl.searchParams.set('compileGroup', parsed.compileGroup);
+      if (parsed.clsiServerId) outputUrl.searchParams.set('clsiserverid', parsed.clsiServerId);
+
+      return { ...file, url: outputUrl.toString() };
+    });
+
     // Download log if available
-    const logFile = (parsed.outputFiles || []).find(f => f.path === 'output.log');
+    const logFile = outputFiles.find(f => f.path === 'output.log');
     let log = '';
     if (logFile) {
-      const logUrl = `${BASE_URL}${logFile.url}`;
-      const logRes = await auth.httpGet(logUrl, cookie);
-      log = logRes.body;
+      const logRes = await auth.httpGet(logFile.url, cookie);
+      if (logRes.status === 200) log = logRes.body;
     }
 
-    return { status: parsed.status, outputFiles: parsed.outputFiles || [], log };
+    return { status: parsed.status, outputFiles, log };
   },
 
   async downloadUrl(params) {
@@ -139,19 +155,80 @@ const handlers = {
     const tmpPath = require('path').join(dir, 'overleaf_' + (fileName || 'download'));
 
     await new Promise((resolve, reject) => {
-      const parsed = new URL(url);
-      const httpModule = parsed.protocol === 'http:' ? require('http') : require('https');
-      httpModule.get({
-        hostname: parsed.hostname,
-        port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
-        path: parsed.pathname + parsed.search,
-        headers: { 'Cookie': cookie },
-      }, (res) => {
-        const ws = fs.createWriteStream(tmpPath);
-        res.pipe(ws);
-        ws.on('finish', () => { ws.close(); resolve(); });
-        ws.on('error', reject);
-      }).on('error', reject);
+      const partPath = tmpPath + '.' + process.pid + '.part';
+
+      const cleanup = () => {
+        try { fs.unlinkSync(partPath); } catch (e) { /* ignore */ }
+      };
+
+      const download = (downloadUrl, redirectsLeft) => {
+        const parsed = new URL(downloadUrl);
+        const httpModule = parsed.protocol === 'http:' ? require('http') : require('https');
+        const req = httpModule.get({
+          hostname: parsed.hostname,
+          port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
+          path: parsed.pathname + parsed.search,
+          headers: { 'Cookie': cookie, 'User-Agent': 'overleaf-neovim/0.1' },
+        }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            res.resume();
+            if (redirectsLeft === 0) {
+              reject(new Error('Too many redirects while downloading output'));
+              return;
+            }
+            download(new URL(res.headers.location, parsed).toString(), redirectsLeft - 1);
+            return;
+          }
+
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            res.resume();
+            reject(new Error(`Download failed with status ${res.statusCode}`));
+            return;
+          }
+
+          let bytesWritten = 0;
+          res.on('data', (chunk) => { bytesWritten += chunk.length; });
+
+          const ws = fs.createWriteStream(partPath);
+          res.pipe(ws);
+          res.on('error', (err) => {
+            ws.destroy();
+            cleanup();
+            reject(err);
+          });
+          ws.on('error', (err) => {
+            cleanup();
+            reject(err);
+          });
+          ws.on('finish', () => {
+            ws.close((closeErr) => {
+              if (closeErr) {
+                cleanup();
+                reject(closeErr);
+                return;
+              }
+              if (bytesWritten === 0) {
+                cleanup();
+                reject(new Error('Downloaded output is empty'));
+                return;
+              }
+              try {
+                fs.renameSync(partPath, tmpPath);
+                resolve();
+              } catch (renameErr) {
+                cleanup();
+                reject(renameErr);
+              }
+            });
+          });
+        });
+        req.on('error', (err) => {
+          cleanup();
+          reject(err);
+        });
+      };
+
+      download(url, 5);
     });
 
     return { path: tmpPath };
