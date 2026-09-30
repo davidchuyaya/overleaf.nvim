@@ -7,6 +7,41 @@ local sync = require('overleaf.sync')
 
 local M = {}
 
+M._exit_cleanup_pending = false
+M._resession_hook_registered = false
+
+local function setup_exit_hooks()
+  local group = vim.api.nvim_create_augroup('overleaf_exit', { clear = true })
+
+  -- ExitPre runs before session plugins commonly save on VimLeavePre. This
+  -- gives pending OT edits time to reach Overleaf before buffers are removed.
+  vim.api.nvim_create_autocmd('ExitPre', {
+    group = group,
+    callback = function() M._prepare_exit() end,
+  })
+
+  -- Fallback cleanup for session managers other than resession.nvim.
+  vim.api.nvim_create_autocmd('VimLeavePre', {
+    group = group,
+    callback = function()
+      if M._exit_cleanup_pending then M._finish_exit_cleanup() end
+    end,
+  })
+
+  -- AstroNvim saves through resession on VimLeavePre. Its synchronous
+  -- pre-save hook lets us remove Overleaf buffers after save eligibility is
+  -- checked but before the session's buffer list is collected.
+  if not M._resession_hook_registered then
+    local ok, resession = pcall(require, 'resession')
+    if ok and type(resession.add_hook) == 'function' then
+      resession.add_hook('pre_save', function()
+        if M._exit_cleanup_pending then M._finish_exit_cleanup() end
+      end)
+      M._resession_hook_registered = true
+    end
+  end
+end
+
 --- Open a file with the configured viewer or platform default
 ---@param file_path string
 local function open_file(file_path)
@@ -39,6 +74,7 @@ M._state = {
 
 function M.setup(opts)
   config.setup(opts)
+  setup_exit_hooks()
 
   -- Default keymaps (prefix: <leader>o for Overleaf)
   local keys = opts and opts.keys or true
@@ -1478,6 +1514,59 @@ function M.sync_export()
     return
   end
   sync.export_all(M._state)
+end
+
+--- Flush pending local edits to Overleaf and keep a synchronous mirror backup.
+---@param timeout_ms? integer
+---@return boolean synced
+function M.flush_all(timeout_ms)
+  local open_docs = {}
+  for _, doc in pairs(M._state.documents) do
+    if doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr) then
+      table.insert(open_docs, doc)
+      sync.write_doc(doc)
+
+      if doc._flush_timer then
+        vim.fn.timer_stop(doc._flush_timer)
+        doc._flush_timer = nil
+      end
+      if doc.joined and doc.pending_ops and not doc.inflight_op then doc:flush() end
+    end
+  end
+
+  if #open_docs == 0 then return true end
+
+  local function synced()
+    for _, doc in ipairs(open_docs) do
+      if doc.pending_ops or doc.inflight_op or doc._rejoining or doc.content ~= doc.server_content then return false end
+    end
+    return true
+  end
+
+  local ok = synced()
+  if not ok and M._state.connected then ok = vim.wait(timeout_ms or 5000, synced, 10) end
+  if not ok then return false end
+
+  for _, doc in ipairs(open_docs) do
+    if doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr) then vim.bo[doc.bufnr].modified = false end
+  end
+  return true
+end
+
+function M._finish_exit_cleanup()
+  buffer.cleanup_all(M._state.documents, config.get().sync_dir)
+  M._exit_cleanup_pending = false
+end
+
+function M._prepare_exit()
+  M._exit_cleanup_pending = false
+  if not M.flush_all(5000) then
+    config.log('error', 'Could not save every pending edit to Overleaf before exit; keeping local mirror buffers')
+    return
+  end
+
+  M._exit_cleanup_pending = true
+  if not M._resession_hook_registered then M._finish_exit_cleanup() end
 end
 
 function M.disconnect()

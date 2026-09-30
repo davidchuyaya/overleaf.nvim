@@ -43,6 +43,27 @@ local function make_doc(content, path)
 end
 
 describe('buffer', function()
+  describe('cleanup_all', function()
+    it('wipes tracked, URI, and restored sync buffers while preserving unrelated files', function()
+      local tracked = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(tracked, 'overleaf://tracked.tex')
+      local restored = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(restored, '/tmp/overleaf-cleanup/project/restored.tex')
+      local unrelated = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(unrelated, '/tmp/unrelated.tex')
+      local documents = { tracked = { bufnr = tracked } }
+
+      local count = buffer.cleanup_all(documents, '/tmp/overleaf-cleanup')
+
+      assert.are.equal(2, count)
+      assert.is_nil(documents.tracked.bufnr)
+      assert.is_false(vim.api.nvim_buf_is_valid(tracked))
+      assert.is_false(vim.api.nvim_buf_is_valid(restored))
+      assert.is_true(vim.api.nvim_buf_is_valid(unrelated))
+      vim.api.nvim_buf_delete(unrelated, { force = true })
+    end)
+  end)
+
   describe('create', function()
     it('preserves content after undo-clear for ASCII', function()
       local content = '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}'
