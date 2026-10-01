@@ -6,22 +6,34 @@ local M = {}
 --- Create a Neovim buffer for an Overleaf document
 ---@param doc table Document instance
 ---@param lines string[] document lines
+---@param opts? table {bufnr?, display?} use display=false to attach in place
 ---@return number|nil bufnr nil when an existing mirror has unsaved edits
-function M.create(doc, lines)
+function M.create(doc, lines, opts)
+  opts = opts or {}
   local name = require('overleaf.sync').buf_name(doc.path)
-  local bufnr = vim.fn.bufnr(name)
+  local bufnr = opts.bufnr or vim.fn.bufnr(name)
+  if opts.bufnr and not vim.api.nvim_buf_is_valid(opts.bufnr) then return nil end
   if bufnr > 0 and vim.api.nvim_buf_is_valid(bufnr) then
+    vim.fn.bufload(bufnr)
     -- A prior ordinary Neo-tree open may already own the mirror's filename.
     -- Reuse it instead of raising E95; never overwrite unsaved local edits.
-    if vim.bo[bufnr].modified then
+    local known_content = opts.reattach
+      and table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n') == doc.content
+    if vim.bo[bufnr].modified and not known_content then
       config.log('error', 'Save the local edits in %s before opening it as a live Overleaf document', doc.path)
       return nil
     end
-    vim.fn.bufload(bufnr)
     vim.bo[bufnr].buflisted = true
   else
     bufnr = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_buf_set_name(bufnr, name)
+  end
+
+  local cursors = {}
+  if opts.display == false then
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if vim.api.nvim_win_get_buf(win) == bufnr then cursors[win] = vim.api.nvim_win_get_cursor(win) end
+    end
   end
 
   -- Buffer options first
@@ -43,11 +55,13 @@ function M.create(doc, lines)
   vim.bo[bufnr].modified = false
 
   doc.bufnr = bufnr
+  local group = vim.api.nvim_create_augroup('OverleafBuffer' .. bufnr, { clear = true })
 
   -- :w clears the modified flag; compilation on write is optional because
   -- auto-save plugins can otherwise trigger it repeatedly while editing.
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     buffer = bufnr,
+    group = group,
     callback = function()
       vim.bo[bufnr].modified = false
       if config.get().compile_on_write then require('overleaf').compile() end
@@ -62,13 +76,15 @@ function M.create(doc, lines)
   doc:check_content()
 
   -- Open buffer in current window FIRST (so FileType autocmds fire on current buffer)
-  vim.api.nvim_set_current_buf(bufnr)
+  if opts.display ~= false then vim.api.nvim_set_current_buf(bufnr) end
 
   -- Editor window options
-  local winnr = vim.api.nvim_get_current_win()
-  vim.wo[winnr].wrap = true
-  vim.wo[winnr].linebreak = true
-  vim.wo[winnr].number = true
+  if opts.display ~= false then
+    local winnr = vim.api.nvim_get_current_win()
+    vim.wo[winnr].wrap = true
+    vim.wo[winnr].linebreak = true
+    vim.wo[winnr].number = true
+  end
 
   -- Set filetype AFTER buffer is current (triggers FileType autocmds for treesitter, copilot, etc.)
   local ext = doc.path:match('%.([^%.]+)$')
@@ -110,12 +126,20 @@ function M.create(doc, lines)
         -- Re-lint on text changes (debounced)
         vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
           buffer = bufnr,
+          group = group,
           callback = function() M._schedule_lint(bufnr) end,
         })
       end
     end)
   end
 
+  for win, pos in pairs(cursors) do
+    if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == bufnr then
+      local row = math.min(pos[1], vim.api.nvim_buf_line_count(bufnr))
+      local text = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ''
+      pcall(vim.api.nvim_win_set_cursor, win, { row, math.min(pos[2], #text) })
+    end
+  end
   return bufnr
 end
 
@@ -175,7 +199,10 @@ end
 ---@param bufnr number
 ---@param doc table Document instance
 function M.attach(bufnr, doc)
+  doc._buffer_attached = true
+  doc._buffer_generation = (doc._buffer_generation or 0) + 1
   vim.api.nvim_buf_attach(bufnr, false, {
+    on_detach = function() doc._buffer_attached = false end,
     on_bytes = function(
       _,
       buf,
@@ -241,9 +268,16 @@ end
 ---@param doc table Document instance
 ---@param ops table[] list of {p, i?, d?}
 function M.apply_remote(doc, ops)
-  if not doc.bufnr or not vim.api.nvim_buf_is_valid(doc.bufnr) then return end
+  if not doc.bufnr or not vim.api.nvim_buf_is_valid(doc.bufnr) or not vim.api.nvim_buf_is_loaded(doc.bufnr) then
+    return
+  end
 
+  local bufnr, generation = doc.bufnr, doc._buffer_generation
   vim.schedule(function()
+    -- A reopened buffer was already populated from doc.content, including
+    -- this operation. Never apply a queued operation to a newer attachment.
+    if doc.bufnr ~= bufnr or doc._buffer_generation ~= generation then return end
+    if not vim.api.nvim_buf_is_valid(doc.bufnr) or not vim.api.nvim_buf_is_loaded(doc.bufnr) then return end
     doc.applying_remote = true
 
     local had_error = false

@@ -96,6 +96,8 @@ function M.setup(opts)
   config.setup(opts)
   setup_exit_hooks()
   require('overleaf.dependencies').setup()
+  require('overleaf.live_buffers').setup()
+  require('overleaf.cursors').setup()
 
   if config.get().tree_provider == 'neo-tree' then
     require('overleaf.neo_tree').setup()
@@ -241,6 +243,9 @@ function M._connect_project(cookie, project_id, project_name)
     M._state.project_id = project_id
     M._state.project_name = project_name
     M._state.project_data = result.project
+    M._state.public_id = result.publicId
+    require('overleaf.cursors').clear_all()
+    require('overleaf.cursors').load_collaborators()
 
     -- Parse project tree
     project.parse_project_tree(result.project)
@@ -252,7 +257,12 @@ function M._connect_project(cookie, project_id, project_name)
 
     -- Start file sync (if sync_dir configured)
     sync.start(project_name)
-    sync.sync_all(M._state, project._project_tree)
+    sync.sync_all(
+      M._state,
+      project._project_tree,
+      function() require('overleaf.live_buffers').attach_open_buffers() end
+    )
+    require('overleaf.cursors').publish_position(true)
 
     -- Show tree immediately
     vim.schedule(function() M.toggle_tree(true) end)
@@ -564,6 +574,10 @@ function M._reconnect_to_project(cookie)
     M._state.connected = true
     M._state.project_data = result.project
     M._reconnect.attempt = 0
+    M._state.public_id = result.publicId
+    require('overleaf.cursors').clear_all()
+    require('overleaf.cursors').load_collaborators()
+    require('overleaf.cursors').publish_position(true)
 
     config.log('info', 'Reconnected to: %s', M._state.project_name or '?')
 
@@ -589,7 +603,7 @@ function M._rejoin_documents()
   end
 end
 
-function M.open_document(doc_id_or_path, doc_path, on_open)
+function M.open_document(doc_id_or_path, doc_path, on_open, opts)
   local doc_id = doc_id_or_path
   local path = doc_path
 
@@ -608,29 +622,53 @@ function M.open_document(doc_id_or_path, doc_path, on_open)
   -- Check if already open
   if M._state.documents[doc_id] then
     local existing = M._state.documents[doc_id]
-    if existing.bufnr and vim.api.nvim_buf_is_valid(existing.bufnr) then
-      vim.api.nvim_set_current_buf(existing.bufnr)
+    if existing._opening then return end
+    if
+      existing.bufnr
+      and vim.api.nvim_buf_is_valid(existing.bufnr)
+      and vim.api.nvim_buf_is_loaded(existing.bufnr)
+      and existing._buffer_attached
+    then
+      if not opts or opts.display ~= false then vim.api.nvim_set_current_buf(existing.bufnr) end
       if on_open then on_open(existing) end
+      return
+    end
+    if existing.joined and existing.content then
+      -- :bdelete/:bunload detach on_bytes even when the buffer number remains
+      -- valid; :bwipeout removes it entirely. Keep the live Document (including
+      -- pending/inflight ops) and reattach a buffer from its latest content.
+      local reattach_opts = vim.tbl_extend('force', opts or {}, { reattach = true })
+      if buffer.create(existing, vim.split(existing.content, '\n', { plain = true }), reattach_opts) then
+        if on_open then on_open(existing) end
+        sync.write_doc(existing)
+        sync.watch(existing)
+        require('overleaf.cursors').publish_position(true)
+        require('overleaf.cursors').render_document(doc_id)
+      end
       return
     end
   end
 
   local doc = Document.new(doc_id, path)
+  doc._opening = true
   M._state.documents[doc_id] = doc
 
   doc:join(function(err, lines, ranges)
+    doc._opening = false
     if err then
       M._state.documents[doc_id] = nil
       return
     end
 
-    if not buffer.create(doc, lines) then
+    if not buffer.create(doc, lines, opts) then
       doc:leave()
       M._state.documents[doc_id] = nil
       return
     end
 
     if on_open then on_open(doc) end
+    require('overleaf.cursors').publish_position(true)
+    require('overleaf.cursors').render_document(doc_id)
 
     -- Write to sync dir and start watching for external changes
     sync.write_doc(doc)
@@ -1583,6 +1621,7 @@ function M.disconnect()
   M._state.project_name = nil
   M._state.project_id = nil
   M._state.project_data = nil
+  M._state.public_id = nil
   M._state.csrf_token = nil
 
   config.log('info', 'Disconnected')

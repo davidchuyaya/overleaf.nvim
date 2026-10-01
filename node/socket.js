@@ -76,6 +76,7 @@ class SocketManager {
     this.sendEvent = sendEvent;
     this.socket = null;
     this.connected = false;
+    this.lastPosition = null;
   }
 
   connect() {
@@ -218,6 +219,36 @@ class SocketManager {
     this.socket.on('clientTracking.clientDisconnected', (id) => {
       this.sendEvent('clientDisconnected', { id });
     });
+
+    this.socket.on('clientTracking.refresh', () => {
+      if (this.connected && this.lastPosition) {
+        this.socket.emit('clientTracking.updatePosition', { ...this.lastPosition });
+      }
+    });
+  }
+
+  updatePosition(position) {
+    if (!this.connected || !this.socket) {
+      throw { code: 'NOT_CONNECTED', message: 'Not connected to a project' };
+    }
+    const { doc_id, row, column } = position;
+    if (doc_id != null && (typeof doc_id !== 'string' ||
+        !Number.isInteger(row) || row < 0 || !Number.isInteger(column) || column < 0)) {
+      throw { code: 'INVALID_PARAM', message: 'Cursor requires doc_id and nonnegative row/column' };
+    }
+    this.lastPosition = doc_id == null ? { doc_id: null } : { doc_id, row, column };
+    // Like the browser client, cursor updates are fire-and-forget. Do not wait
+    // for an ACK and create timeout notifications on every cursor movement.
+    this.socket.emit('clientTracking.updatePosition', { ...this.lastPosition });
+    return {};
+  }
+
+  async getConnectedUsers() {
+    if (!this.connected || !this.socket) {
+      throw { code: 'NOT_CONNECTED', message: 'Not connected to a project' };
+    }
+    const [users] = await this._promisifiedEmit('clientTracking.getConnectedUsers');
+    return { users: users || [] };
   }
 
   _promisifiedEmit(event, ...args) {
@@ -317,6 +348,7 @@ class SocketManager {
       }
       this.socket = null;
       this.connected = false;
+      this.lastPosition = null;
     }
   }
 }

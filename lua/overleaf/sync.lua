@@ -23,6 +23,9 @@ function M.start(project_name)
   -- Use project subdirectory
   M._sync_dir = sync_dir .. '/' .. project_name:gsub('[^%w%-_%.%s]', '_')
   vim.fn.mkdir(M._sync_dir, 'p')
+  -- Neovim resolves symlinks in buffer names (e.g. /var -> /private/var on
+  -- macOS), so use the same canonical root when recognizing mirror buffers.
+  M._sync_dir = (vim.uv or vim.loop).fs_realpath(M._sync_dir) or vim.fs.normalize(M._sync_dir)
 
   config.log('info', 'File sync: %s', M._sync_dir)
 end
@@ -125,7 +128,7 @@ end
 ---@return string|nil doc_path the document path if it's an Overleaf buffer
 function M.parse_buf_name(bufname)
   if bufname:match('^overleaf://') then return bufname:gsub('^overleaf://', '') end
-  if M._sync_dir and bufname:sub(1, #M._sync_dir) == M._sync_dir then
+  if M._sync_dir and bufname:sub(1, #M._sync_dir + 1) == M._sync_dir .. '/' then
     return bufname:sub(#M._sync_dir + 2) -- +2 for the trailing /
   end
   return nil

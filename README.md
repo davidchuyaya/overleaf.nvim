@@ -193,9 +193,17 @@ Overleaf-scoped tree while connected and the normal working-directory explorer
 otherwise.
 
 Live document buffers keep the mirror's filename but use `buftype=acwrite`.
-Neo-tree document opens remain live after tree refreshes and reopening. If an
-ordinary mirror buffer is already open, it is reused; save any unsaved local
-edits before opening it through Overleaf so they are not overwritten.
+While connected, opening a project text file through Neo-tree (including
+alternate open mappings), a file picker, `:edit`, or a split automatically
+attaches it to live OT. Preview buffers and unrelated files are left alone.
+Closing and reopening a buffer restores its change listener without resetting
+pending edits. If an ordinary mirror buffer already has unsaved local edits,
+save those before opening it through Overleaf so they are not overwritten.
+
+Your normal- and insert-mode cursor positions are shared with browser editors
+using your Overleaf account's name. Existing collaborators' cursor positions
+are fetched on connection and shown as soon as their document is opened;
+they do not need to move first. Cursor updates are throttled to about 100 ms.
 
 ## Workflow
 

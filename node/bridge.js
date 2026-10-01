@@ -97,6 +97,16 @@ const handlers = {
     return await socketManager.applyOtUpdate(docId, op, v, content);
   },
 
+  async updatePosition(params) {
+    if (!socketManager) throw { code: 'NOT_CONNECTED', message: 'Not connected to a project' };
+    return socketManager.updatePosition(params);
+  },
+
+  async getConnectedUsers() {
+    if (!socketManager) throw { code: 'NOT_CONNECTED', message: 'Not connected to a project' };
+    return await socketManager.getConnectedUsers();
+  },
+
   async compile(params) {
     const { cookie, csrfToken, projectId, draft = false } = params;
     if (!cookie || !csrfToken || !projectId) {

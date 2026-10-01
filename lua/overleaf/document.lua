@@ -183,6 +183,7 @@ end
 function Document:check_content()
   if not self.joined or self._rejoining then return true end
   if not self.bufnr or not vim.api.nvim_buf_is_valid(self.bufnr) then return true end
+  if not vim.api.nvim_buf_is_loaded(self.bufnr) then return true end
   if self.applying_remote then return true end
 
   local lines = vim.api.nvim_buf_get_lines(self.bufnr, 0, -1, false)

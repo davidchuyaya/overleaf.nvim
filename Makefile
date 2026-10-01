@@ -1,4 +1,4 @@
-.PHONY: test test-lua test-node lint fmt fmt-check
+.PHONY: test test-lua test-node test-node-unit lint fmt fmt-check
 
 PLENARY_DIR := .tests/plenary.nvim
 
@@ -14,7 +14,11 @@ test-lua: $(PLENARY_DIR)
 
 test-node:
 	cd tests/node && npm install --silent 2>/dev/null
+	node --test tests/node/socket.test.js
 	node tests/node/integration.test.js
+
+test-node-unit:
+	node --test tests/node/socket.test.js
 
 lint:
 	luacheck lua/ tests/ plugin/
