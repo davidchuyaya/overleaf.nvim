@@ -82,20 +82,24 @@ local function find_editor_window(tree_win)
   end
 end
 
+local function open_path(winid, path)
+  if not is_overleaf_path(path) then return false end
+  local editor_win = find_editor_window(winid)
+  if editor_win then
+    vim.api.nvim_set_current_win(editor_win)
+  else
+    vim.cmd('rightbelow vsplit')
+  end
+
+  if require('overleaf').open_synced_file(path) then return true end
+  if type(winid) == 'number' and vim.api.nvim_win_is_valid(winid) then vim.api.nvim_set_current_win(winid) end
+  return false
+end
+
 local function open(winid)
   local state = state_for_window(winid)
   local node = selected_node(state)
-  if is_overleaf_state(state) and node and node.type == 'file' then
-    local editor_win = find_editor_window(winid)
-    if editor_win then
-      vim.api.nvim_set_current_win(editor_win)
-    else
-      vim.cmd('rightbelow vsplit')
-    end
-
-    if require('overleaf').open_synced_file(node:get_id()) then return end
-    if vim.api.nvim_win_is_valid(winid) then vim.api.nvim_set_current_win(winid) end
-  end
+  if is_overleaf_state(state) and node and node.type == 'file' and open_path(winid, node:get_id()) then return end
   filesystem_command(winid, 'open')
 end
 
@@ -185,6 +189,37 @@ function M.attach_open_trees()
 end
 
 function M.setup()
+  -- FileType runs before Neo-tree acquires its window and installs mappings.
+  -- Filesystem scans are asynchronous, so even a scheduled FileType handler
+  -- (or a callback after command.execute) can be overwritten by the renderer.
+  -- AFTER_RENDER also runs for reused buffers when the explorer is reopened.
+  local ok, events = pcall(require, 'neo-tree.events')
+  if ok then
+    local subscription = {
+      event = events.AFTER_RENDER,
+      id = 'overleaf.neo_tree.attach',
+      handler = function(state)
+        if state and state.bufnr and is_overleaf_state(state) then M.attach(state.bufnr) end
+      end,
+    }
+    events.unsubscribe(subscription)
+    events.subscribe(subscription)
+
+    -- Also intercept Neo-tree's default edit command. This prevents a local
+    -- mirror from being opened even if another plugin replaces our Enter map.
+    local open_subscription = {
+      event = events.FILE_OPEN_REQUESTED,
+      id = 'overleaf.neo_tree.open',
+      handler = function(data)
+        if not data or (data.open_cmd ~= 'edit' and data.open_cmd ~= 'b') then return end
+        if not data.state or data.state.name ~= 'filesystem' then return end
+        if open_path(data.state.winid, data.path) then return { handled = true } end
+      end,
+    }
+    events.unsubscribe(open_subscription)
+    events.subscribe(open_subscription)
+  end
+
   local group = vim.api.nvim_create_augroup('OverleafNeoTree', { clear = true })
   vim.api.nvim_create_autocmd('FileType', {
     group = group,

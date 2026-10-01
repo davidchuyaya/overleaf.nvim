@@ -72,6 +72,36 @@ describe('buffer', function()
   end)
 
   describe('create', function()
+    it('promotes an existing clean mirror buffer instead of duplicating its name', function()
+      local doc = make_doc('remote content')
+      local bufnr = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(bufnr, require('overleaf.sync').buf_name(doc.path))
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'old mirror content' })
+      vim.bo[bufnr].modified = false
+
+      assert.are.equal(bufnr, buffer.create(doc, { 'remote content' }))
+      assert.are.equal('acwrite', vim.bo[bufnr].buftype)
+      assert.are.same({ 'remote content' }, vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+      vim.api.nvim_buf_set_text(bufnr, 0, 14, 0, 14, { ' local' })
+      assert.are.equal('remote content local', doc.content)
+      assert.are.equal(1, #doc._submitted_ops)
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+    end)
+
+    it('does not overwrite unsaved edits in an existing mirror buffer', function()
+      local doc = make_doc('remote content')
+      local bufnr = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(bufnr, require('overleaf.sync').buf_name(doc.path))
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'unsaved local content' })
+      vim.bo[bufnr].modified = true
+
+      assert.is_nil(buffer.create(doc, { 'remote content' }))
+      assert.is_nil(doc.bufnr)
+      assert.are.same({ 'unsaved local content' }, vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+      assert.is_true(vim.bo[bufnr].modified)
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+    end)
+
     it('preserves content after undo-clear for ASCII', function()
       local content = '\\documentclass{article}\n\\begin{document}\nHello World\n\\end{document}'
       local lines = vim.split(content, '\n', { plain = true })

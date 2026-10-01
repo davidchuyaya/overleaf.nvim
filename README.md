@@ -192,6 +192,11 @@ copy and move operations remain blocked. `explorer_key` opens the
 Overleaf-scoped tree while connected and the normal working-directory explorer
 otherwise.
 
+Live document buffers keep the mirror's filename but use `buftype=acwrite`.
+Neo-tree document opens remain live after tree refreshes and reopening. If an
+ordinary mirror buffer is already open, it is reused; save any unsaved local
+edits before opening it through Overleaf so they are not overwritten.
+
 ## Workflow
 
 1. `:Overleaf` — authenticate and select a project

@@ -6,10 +6,23 @@ local M = {}
 --- Create a Neovim buffer for an Overleaf document
 ---@param doc table Document instance
 ---@param lines string[] document lines
----@return number bufnr
+---@return number|nil bufnr nil when an existing mirror has unsaved edits
 function M.create(doc, lines)
-  local bufnr = vim.api.nvim_create_buf(true, false)
-  vim.api.nvim_buf_set_name(bufnr, require('overleaf.sync').buf_name(doc.path))
+  local name = require('overleaf.sync').buf_name(doc.path)
+  local bufnr = vim.fn.bufnr(name)
+  if bufnr > 0 and vim.api.nvim_buf_is_valid(bufnr) then
+    -- A prior ordinary Neo-tree open may already own the mirror's filename.
+    -- Reuse it instead of raising E95; never overwrite unsaved local edits.
+    if vim.bo[bufnr].modified then
+      config.log('error', 'Save the local edits in %s before opening it as a live Overleaf document', doc.path)
+      return nil
+    end
+    vim.fn.bufload(bufnr)
+    vim.bo[bufnr].buflisted = true
+  else
+    bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(bufnr, name)
+  end
 
   -- Buffer options first
   vim.bo[bufnr].buftype = 'acwrite'

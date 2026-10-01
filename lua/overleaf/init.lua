@@ -624,7 +624,11 @@ function M.open_document(doc_id_or_path, doc_path, on_open)
       return
     end
 
-    buffer.create(doc, lines)
+    if not buffer.create(doc, lines) then
+      doc:leave()
+      M._state.documents[doc_id] = nil
+      return
+    end
 
     if on_open then on_open(doc) end
 
