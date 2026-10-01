@@ -8,7 +8,6 @@ M._config = {
   pdf_viewer = nil, -- Viewer command; use 'skim' for the macOS Skim app
   pdf_dir = nil, -- PDF output directory (nil = system temp dir)
   compile_on_write = true, -- Compile when an Overleaf buffer is written
-  compile_mode = 'normal', -- Compile mode: 'normal' or 'fast' (draft without images)
   tree_provider = 'native', -- File tree: 'native' or 'neo-tree'
   explorer_key = '<leader>e', -- Neo-tree shortcut, scoped to Overleaf while connected
   ensure_texlab = true, -- Install TexLab through Mason when Mason is available

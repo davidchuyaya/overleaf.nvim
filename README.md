@@ -14,7 +14,6 @@ Edit your Overleaf projects directly in Neovim with full real-time collaboration
 - **Compile & PDF preview** — compile LaTeX and open the PDF
 - **Comments & reviews** — view, reply, resolve comment threads
 - **Collaborator cursors** — see where other users are editing
-- **Project-wide search** — grep across all documents
 - **File management** — create, delete, rename, upload files
 - **History** — view project version history
 - **Diagnostics** — chktex linter + LaTeX compile errors via `vim.diagnostic`
@@ -99,18 +98,15 @@ To get the cookie manually: open overleaf.com in your browser → DevTools (F12)
 | `:Overleaf` | Connect (or show status if connected) |
 | `:Overleaf connect` | Connect to Overleaf |
 | `:Overleaf disconnect` | Disconnect |
-| `:Overleaf compile [fast\|normal]` | Compile LaTeX project (configured mode by default) |
+| `:Overleaf compile [fast\|normal]` | Compile LaTeX project (normal by default) |
 | `:Overleaf tree` | Toggle file tree |
-| `:Overleaf open` | Open a document |
 | `:Overleaf projects` | Switch project |
 | `:Overleaf status` | Show connection status |
-| `:Overleaf preview` | Preview binary file (images, etc.) |
 | `:Overleaf new [name]` | Create new document |
 | `:Overleaf mkdir [name]` | Create new folder |
 | `:Overleaf delete` | Delete file/folder |
 | `:Overleaf rename` | Rename file/folder |
 | `:Overleaf upload [path]` | Upload local file |
-| `:Overleaf search [pattern]` | Search across all documents |
 | `:Overleaf comments` | List all comments |
 | `:Overleaf comments refresh` | Refresh comments from server |
 | `:Overleaf history` | View project history |
@@ -124,15 +120,12 @@ To get the cookie manually: open overleaf.com in your browser → DevTools (F12)
 |-----|-------------|
 | `<leader>oc` | Connect |
 | `<leader>od` | Disconnect |
-| `<leader>ob` | Build (compile) |
-| `<leader>oB` | Build with normal compile mode |
+| `<leader>ob` | Build normally |
+| `<leader>of` | Build in Fast [draft] mode |
 | `<leader>ot` | Toggle file tree |
-| `<leader>oo` | Open document picker |
-| `<leader>op` | Preview file |
 | `<leader>or` | Read comment at cursor |
 | `<leader>oR` | Reply to comment |
 | `<leader>ox` | Resolve/reopen comment |
-| `<leader>of` | Find in project (search) |
 
 ### Tree Keymaps
 
@@ -167,10 +160,6 @@ require('overleaf').setup({
   -- Disable this when an auto-save plugin causes repeated compilations.
   compile_on_write = true,
 
-  -- 'fast' enables Overleaf Fast [draft] mode, which replaces images with boxes.
-  -- Use <leader>oB or :Overleaf compile normal for a full-quality compile.
-  compile_mode = 'normal',
-
   -- File tree implementation: 'native' or 'neo-tree' (default: 'native')
   -- Neo-tree requires sync_dir so it has a local project directory to show.
   tree_provider = 'native',
@@ -199,10 +188,7 @@ With both `sync_dir` and `tree_provider = 'neo-tree'`, the Overleaf tree uses
 Neo-tree's filesystem view. Document opens are routed back through Overleaf's
 live OT buffers, and mirror-changing operations are blocked in favor of the
 plugin's remote file commands. `explorer_key` opens the Overleaf-scoped tree
-while connected and the normal working-directory explorer otherwise. The
-open-document and project-search commands use Snacks when it is available, so
-`<leader>oo` opens the file picker and `<leader>of` opens live grep scoped to
-the connected project.
+while connected and the normal working-directory explorer otherwise.
 
 ## Workflow
 

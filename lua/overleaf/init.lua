@@ -94,15 +94,12 @@ function M.setup(opts)
     pcall(vim.keymap.del, 'n', '<leader>o')
     map('n', '<leader>oc', function() M.connect() end, { desc = 'Overleaf: Connect' })
     map('n', '<leader>od', function() M.disconnect() end, { desc = 'Overleaf: Disconnect' })
-    map('n', '<leader>ob', function() M.compile() end, { desc = 'Overleaf: Build (compile)' })
-    map('n', '<leader>oB', function() M.compile('normal') end, { desc = 'Overleaf: Build (normal compile)' })
+    map('n', '<leader>ob', function() M.compile('normal') end, { desc = 'Overleaf: Build (normal)' })
+    map('n', '<leader>of', function() M.compile('fast') end, { desc = 'Overleaf: Build (fast draft)' })
     map('n', '<leader>ot', function() M.toggle_tree() end, { desc = 'Overleaf: Toggle tree' })
-    map('n', '<leader>oo', function() M.select_document() end, { desc = 'Overleaf: Open document' })
-    map('n', '<leader>op', function() M.preview_file() end, { desc = 'Overleaf: Preview file' })
     map('n', '<leader>or', function() M.show_comment() end, { desc = 'Overleaf: Read comment' })
     map('n', '<leader>oR', function() M.reply_comment() end, { desc = 'Overleaf: Reply to comment' })
     map('n', '<leader>ox', function() M.resolve_comment() end, { desc = 'Overleaf: Resolve/reopen comment' })
-    map('n', '<leader>of', function() M.search() end, { desc = 'Overleaf: Find in project' })
   end
 end
 
@@ -646,20 +643,6 @@ function M.open_synced_file(file_path, pos)
   return true
 end
 
-local function snacks_confirm(picker, item)
-  if item then
-    local file_path = require('snacks.picker.util').path(item)
-    local doc_path = file_path and sync.parse_buf_name(vim.fs.normalize(file_path)) or nil
-    local entry = doc_path and project.get_doc_by_path(doc_path) or nil
-    if entry and entry.type == 'doc' then
-      picker:close()
-      vim.schedule(function() M.open_synced_file(file_path, item.pos) end)
-      return
-    end
-  end
-  require('snacks.picker.actions').confirm(picker, item)
-end
-
 function M.select_project()
   if #project._projects == 0 then
     config.log('warn', 'Not authenticated. Run :OverleafConnect first.')
@@ -670,24 +653,6 @@ function M.select_project()
     local cookie = config.get().cookie
     M._connect_project(cookie, project_id, project_name)
   end)
-end
-
-function M.select_document()
-  if not M._state.connected then
-    config.log('warn', 'Not connected. Run :OverleafConnect first.')
-    return
-  end
-
-  local has_snacks, snacks = pcall(require, 'snacks')
-  if sync._sync_dir and has_snacks and snacks.picker then
-    snacks.picker.files({
-      cwd = sync._sync_dir,
-      title = 'Overleaf Files',
-      confirm = snacks_confirm,
-    })
-  else
-    project.select_document(function(doc_id, doc_path) M.open_document(doc_id, doc_path) end)
-  end
 end
 
 function M.toggle_tree(force_open)
@@ -721,47 +686,6 @@ function M.toggle_explorer()
 
   local ok = pcall(vim.cmd, 'Neotree toggle')
   if not ok then config.log('warn', 'Neo-tree is unavailable') end
-end
-
-function M.preview_file()
-  if not M._state.connected then
-    config.log('warn', 'Not connected. Run :Overleaf connect first.')
-    return
-  end
-
-  -- Get file entries from project tree
-  local files = {}
-  for _, entry in ipairs(project._project_tree) do
-    if entry.type == 'file' then table.insert(files, entry) end
-  end
-
-  if #files == 0 then
-    config.log('info', 'No binary files in project')
-    return
-  end
-
-  vim.ui.select(files, {
-    prompt = 'Preview file:',
-    format_item = function(item) return item.path end,
-  }, function(choice)
-    if not choice then return end
-
-    config.log('info', 'Downloading %s...', choice.name)
-    bridge.request('downloadFile', {
-      cookie = config.get().cookie,
-      projectId = M._state.project_id,
-      fileId = choice.id,
-      fileName = choice.name,
-      outputDir = config.get().pdf_dir,
-    }, function(err, result)
-      if err then
-        config.log('error', 'Download failed: %s', err.message)
-        return
-      end
-      config.log('info', 'Opening %s', result.path)
-      vim.schedule(function() open_file(result.path) end)
-    end)
-  end)
 end
 
 function M.create_doc(name, parent_folder_id)
@@ -890,34 +814,6 @@ function M.create_folder(name, parent_folder_id)
     do_create(name)
   else
     vim.ui.input({ prompt = 'New folder name: ' }, do_create)
-  end
-end
-
-function M.search(pattern)
-  if not M._state.connected then
-    config.log('warn', 'Not connected.')
-    return
-  end
-
-  local has_snacks, snacks = pcall(require, 'snacks')
-  if not pattern and sync._sync_dir and has_snacks and snacks.picker and vim.fn.executable('rg') == 1 then
-    snacks.picker.grep({
-      cwd = sync._sync_dir,
-      title = 'Overleaf Grep',
-      confirm = snacks_confirm,
-    })
-    return
-  end
-
-  local function do_search(pat)
-    if not pat or pat == '' then return end
-    require('overleaf.search').grep(pat, M._state)
-  end
-
-  if pattern then
-    do_search(pattern)
-  else
-    vim.ui.input({ prompt = 'Search pattern: ' }, do_search)
   end
 end
 
@@ -1130,7 +1026,7 @@ function M.compile(mode)
     return
   end
 
-  mode = mode or config.get().compile_mode
+  mode = mode or 'normal'
   if mode ~= 'normal' and mode ~= 'fast' then
     config.log('error', 'Unknown compile mode: %s (expected normal or fast)', tostring(mode))
     return

@@ -20,8 +20,6 @@ describe('config', function()
 
     it('compiles on write by default', function() assert.is_true(config.get().compile_on_write) end)
 
-    it('uses normal compile mode by default', function() assert.are.equal('normal', config.get().compile_mode) end)
-
     it('uses the native file tree by default', function() assert.are.equal('native', config.get().tree_provider) end)
 
     it(
@@ -48,11 +46,6 @@ describe('config', function()
     it('can disable compilation on write', function()
       config.setup({ compile_on_write = false })
       assert.is_false(config.get().compile_on_write)
-    end)
-
-    it('can use fast draft compilation', function()
-      config.setup({ compile_mode = 'fast' })
-      assert.are.equal('fast', config.get().compile_mode)
     end)
 
     it('can use Neo-tree as the file tree', function()

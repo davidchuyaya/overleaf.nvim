@@ -86,20 +86,6 @@ function M._walk_folder(folder, prefix, depth)
   end
 end
 
-function M.select_document(callback)
-  if #M._project_tree == 0 then
-    config.log('warn', 'No documents in project')
-    return
-  end
-
-  vim.ui.select(M._project_tree, {
-    prompt = 'Select Document:',
-    format_item = function(item) return item.path end,
-  }, function(choice)
-    if choice then callback(choice.id, choice.path) end
-  end)
-end
-
 function M.get_doc_by_id(doc_id)
   for _, doc in ipairs(M._project_tree) do
     if doc.id == doc_id then return doc end

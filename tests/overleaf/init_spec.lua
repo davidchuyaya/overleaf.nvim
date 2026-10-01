@@ -90,21 +90,19 @@ describe('overleaf compile modes', function()
 
   it('passes fast draft mode to the bridge', function()
     local request
-    config.setup({ compile_mode = 'fast' })
     bridge.request = function(method, params) request = { method = method, params = params } end
 
-    overleaf.compile()
+    overleaf.compile('fast')
 
     assert.are.equal('compile', request.method)
     assert.is_true(request.params.draft)
   end)
 
-  it('can override fast mode with a normal compile', function()
+  it('uses normal mode when no mode is specified', function()
     local request
-    config.setup({ compile_mode = 'fast' })
     bridge.request = function(method, params) request = { method = method, params = params } end
 
-    overleaf.compile('normal')
+    overleaf.compile()
 
     assert.are.equal('compile', request.method)
     assert.is_false(request.params.draft)
