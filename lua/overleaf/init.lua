@@ -95,6 +95,7 @@ function M.setup(opts)
     map('n', '<leader>oc', function() M.connect() end, { desc = 'Overleaf: Connect' })
     map('n', '<leader>od', function() M.disconnect() end, { desc = 'Overleaf: Disconnect' })
     map('n', '<leader>ob', function() M.compile() end, { desc = 'Overleaf: Build (compile)' })
+    map('n', '<leader>oB', function() M.compile('normal') end, { desc = 'Overleaf: Build (normal compile)' })
     map('n', '<leader>ot', function() M.toggle_tree() end, { desc = 'Overleaf: Toggle tree' })
     map('n', '<leader>oo', function() M.select_document() end, { desc = 'Overleaf: Open document' })
     map('n', '<leader>op', function() M.preview_file() end, { desc = 'Overleaf: Preview file' })
@@ -1122,18 +1123,27 @@ function M._show_history(updates)
   end)
 end
 
-function M.compile()
+---@param mode? 'normal'|'fast'
+function M.compile(mode)
   if not M._state.connected then
     config.log('warn', 'Not connected. Run :Overleaf connect first.')
     return
   end
 
-  config.log('info', 'Compiling...')
+  mode = mode or config.get().compile_mode
+  if mode ~= 'normal' and mode ~= 'fast' then
+    config.log('error', 'Unknown compile mode: %s (expected normal or fast)', tostring(mode))
+    return
+  end
+
+  local draft = mode == 'fast'
+  config.log('info', draft and 'Compiling (fast draft)...' or 'Compiling...')
 
   bridge.request('compile', {
     cookie = config.get().cookie,
     csrfToken = M._state.csrf_token,
     projectId = M._state.project_id,
+    draft = draft,
   }, function(err, result)
     if err then
       config.log('error', 'Compile failed: %s', err.message)

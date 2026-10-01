@@ -98,7 +98,7 @@ const handlers = {
   },
 
   async compile(params) {
-    const { cookie, csrfToken, projectId } = params;
+    const { cookie, csrfToken, projectId, draft = false } = params;
     if (!cookie || !csrfToken || !projectId) {
       throw { code: 'MISSING_PARAM', message: 'cookie, csrfToken, and projectId are required' };
     }
@@ -106,7 +106,7 @@ const handlers = {
     const compileRes = await auth.httpPost(
       `${BASE_URL}/project/${projectId}/compile?auto_compile=true`,
       cookie, csrfToken,
-      { check: 'silent', draft: false, incrementalCompilesEnabled: true, stopOnFirstError: false }
+      { check: 'silent', draft: Boolean(draft), incrementalCompilesEnabled: true, stopOnFirstError: false }
     );
 
     if (compileRes.status !== 200) {

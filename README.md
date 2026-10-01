@@ -99,7 +99,7 @@ To get the cookie manually: open overleaf.com in your browser → DevTools (F12)
 | `:Overleaf` | Connect (or show status if connected) |
 | `:Overleaf connect` | Connect to Overleaf |
 | `:Overleaf disconnect` | Disconnect |
-| `:Overleaf compile` | Compile LaTeX project |
+| `:Overleaf compile [fast\|normal]` | Compile LaTeX project (configured mode by default) |
 | `:Overleaf tree` | Toggle file tree |
 | `:Overleaf open` | Open a document |
 | `:Overleaf projects` | Switch project |
@@ -125,6 +125,7 @@ To get the cookie manually: open overleaf.com in your browser → DevTools (F12)
 | `<leader>oc` | Connect |
 | `<leader>od` | Disconnect |
 | `<leader>ob` | Build (compile) |
+| `<leader>oB` | Build with normal compile mode |
 | `<leader>ot` | Toggle file tree |
 | `<leader>oo` | Open document picker |
 | `<leader>op` | Preview file |
@@ -165,6 +166,10 @@ require('overleaf').setup({
   -- Compile whenever an Overleaf buffer is written (default: true)
   -- Disable this when an auto-save plugin causes repeated compilations.
   compile_on_write = true,
+
+  -- 'fast' enables Overleaf Fast [draft] mode, which replaces images with boxes.
+  -- Use <leader>oB or :Overleaf compile normal for a full-quality compile.
+  compile_mode = 'normal',
 
   -- File tree implementation: 'native' or 'neo-tree' (default: 'native')
   -- Neo-tree requires sync_dir so it has a local project directory to show.

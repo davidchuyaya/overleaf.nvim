@@ -2,7 +2,7 @@
 local subcommands = {
   connect = function() require('overleaf').connect() end,
   disconnect = function() require('overleaf').disconnect() end,
-  compile = function() require('overleaf').compile() end,
+  compile = function(args) require('overleaf').compile(args) end,
   tree = function() require('overleaf').toggle_tree() end,
   open = function(args) require('overleaf').open_document(args) end,
   projects = function() require('overleaf').select_project() end,
@@ -74,6 +74,7 @@ end, {
     end
     -- Complete subcommand arguments
     local sub = parts[2]
+    if sub == 'compile' then return { 'fast', 'normal' } end
     if sub == 'comments' then return { 'refresh' } end
     if sub == 'sync' then return { 'import', 'export' } end
     return {}

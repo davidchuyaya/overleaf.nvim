@@ -64,3 +64,49 @@ describe('overleaf shutdown', function()
     package.loaded.resession = nil
   end)
 end)
+
+describe('overleaf compile modes', function()
+  local overleaf = require('overleaf')
+  local bridge = require('overleaf.bridge')
+  local config = require('overleaf.config')
+  local original_config
+  local original_request
+  local original_state
+
+  before_each(function()
+    original_config = vim.deepcopy(config._config)
+    original_request = bridge.request
+    original_state = vim.deepcopy(overleaf._state)
+    overleaf._state.connected = true
+    overleaf._state.project_id = 'project-id'
+    overleaf._state.csrf_token = 'csrf-token'
+  end)
+
+  after_each(function()
+    config._config = original_config
+    bridge.request = original_request
+    overleaf._state = original_state
+  end)
+
+  it('passes fast draft mode to the bridge', function()
+    local request
+    config.setup({ compile_mode = 'fast' })
+    bridge.request = function(method, params) request = { method = method, params = params } end
+
+    overleaf.compile()
+
+    assert.are.equal('compile', request.method)
+    assert.is_true(request.params.draft)
+  end)
+
+  it('can override fast mode with a normal compile', function()
+    local request
+    config.setup({ compile_mode = 'fast' })
+    bridge.request = function(method, params) request = { method = method, params = params } end
+
+    overleaf.compile('normal')
+
+    assert.are.equal('compile', request.method)
+    assert.is_false(request.params.draft)
+  end)
+end)
