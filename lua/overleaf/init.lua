@@ -72,6 +72,26 @@ M._state = {
   documents = {}, -- doc_id -> Document
 }
 
+local function refresh_trees()
+  require('overleaf.tree').refresh()
+  if config.get().tree_provider == 'neo-tree' then pcall(function() require('overleaf.neo_tree').refresh() end) end
+end
+
+local function close_documents_under(entry)
+  if not entry then return end
+  local matches = {}
+  for doc_id, doc in pairs(M._state.documents) do
+    local match = doc_id == entry.id
+      or (entry.type == 'folder' and doc.path and doc.path:sub(1, #entry.path) == entry.path)
+    if match then table.insert(matches, { id = doc_id, doc = doc }) end
+  end
+  for _, item in ipairs(matches) do
+    sync.unwatch(item.doc)
+    buffer.cleanup(item.doc)
+    M._state.documents[item.id] = nil
+  end
+end
+
 function M.setup(opts)
   config.setup(opts)
   setup_exit_hooks()
@@ -337,7 +357,7 @@ function M._setup_event_handlers()
         end
       end
 
-      vim.schedule(function() require('overleaf.tree').refresh() end)
+      vim.schedule(refresh_trees)
       return
     end
 
@@ -362,7 +382,8 @@ function M._setup_event_handlers()
         depth = depth,
       })
     end
-    vim.schedule(function() require('overleaf.tree').refresh() end)
+    sync.create_path(path, false)
+    vim.schedule(refresh_trees)
   end)
 
   bridge.on_event('reciveNewFile', function(data)
@@ -380,15 +401,17 @@ function M._setup_event_handlers()
           end
         end
       end
-      project.add_entry({
+      local entry = {
         id = file._id or file.id,
         name = file.name,
         path = path,
         type = 'file',
         depth = depth,
-      })
+      }
+      project.add_entry(entry)
+      sync._download_file(entry, M._state.project_id)
     end
-    vim.schedule(function() require('overleaf.tree').refresh() end)
+    vim.schedule(refresh_trees)
   end)
 
   bridge.on_event('removeEntity', function(data)
@@ -403,8 +426,13 @@ function M._setup_event_handlers()
       return
     end
 
+    local entry = project.get_doc_by_id(data.entityId)
+    if entry then
+      close_documents_under(entry)
+      sync.remove_path(entry.path)
+    end
     project.remove_entry(data.entityId)
-    vim.schedule(function() require('overleaf.tree').refresh() end)
+    vim.schedule(refresh_trees)
   end)
 
   -- Comment events
@@ -741,7 +769,8 @@ function M.create_doc(name, parent_folder_id)
           type = 'doc',
           depth = depth,
         })
-        require('overleaf.tree').refresh()
+        sync.create_path(full_path, false)
+        refresh_trees()
       end)
     end)
   end
@@ -805,7 +834,8 @@ function M.create_folder(name, parent_folder_id)
           type = 'folder',
           depth = depth,
         })
-        require('overleaf.tree').refresh()
+        sync.create_path(full_path, true)
+        refresh_trees()
       end)
     end)
   end
@@ -860,22 +890,14 @@ function M.upload_file(file_path, parent_folder_id)
   end
 end
 
-function M.rename_entity()
+---@param entry? table Project entry to rename; prompts for one when omitted.
+function M.rename_entity(entry)
   if not M._state.connected then
     config.log('warn', 'Not connected.')
     return
   end
 
-  -- Show entries to rename
-  local entries = {}
-  for _, entry in ipairs(project._project_tree) do
-    table.insert(entries, entry)
-  end
-
-  vim.ui.select(entries, {
-    prompt = 'Rename:',
-    format_item = function(item) return item.path end,
-  }, function(choice)
+  local function rename(choice)
     if not choice then return end
 
     vim.ui.input({ prompt = 'New name for "' .. choice.name .. '": ', default = choice.name }, function(new_name)
@@ -894,44 +916,54 @@ function M.rename_entity()
           return
         end
         vim.schedule(function()
+          local old_path = choice.path
           local updated = project.rename_entry(choice.id, new_name)
-          if updated and choice.type == 'doc' then
-            local doc = M._state.documents[choice.id]
-            if doc and doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr) then
-              doc.path = updated.path
-              vim.api.nvim_buf_set_name(doc.bufnr, sync.buf_name(updated.path))
+          if updated then
+            sync.rename_path(old_path, updated.path)
+            for doc_id, doc in pairs(M._state.documents) do
+              local new_doc_path
+              if doc_id == choice.id then
+                new_doc_path = updated.path
+              elseif choice.type == 'folder' and doc.path:sub(1, #old_path) == old_path then
+                new_doc_path = updated.path .. doc.path:sub(#old_path + 1)
+              end
+              if new_doc_path then
+                doc.path = new_doc_path
+                if doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr) then
+                  vim.api.nvim_buf_set_name(doc.bufnr, sync.buf_name(new_doc_path))
+                end
+                sync.watch(doc)
+              end
             end
+            config.log('info', 'Renamed to: %s', updated.path)
           end
-          if updated then config.log('info', 'Renamed to: %s', updated.path) end
-          require('overleaf.tree').refresh()
+          refresh_trees()
         end)
       end)
     end)
-  end)
+  end
+
+  if entry then
+    rename(entry)
+    return
+  end
+
+  vim.ui.select(project._project_tree, {
+    prompt = 'Rename:',
+    format_item = function(item) return item.path end,
+  }, rename)
 end
 
-function M.delete_entity()
+---@param entry? table Project entry to delete; prompts for one when omitted.
+function M.delete_entity(entry)
   if not M._state.connected then
     config.log('warn', 'Not connected.')
     return
   end
 
-  -- Show deletable entries
-  local entries = {}
-  for _, entry in ipairs(project._project_tree) do
-    table.insert(entries, entry)
-  end
-
-  vim.ui.select(entries, {
-    prompt = 'Delete:',
-    format_item = function(item)
-      local icon = item.type == 'folder' and '[dir] ' or ''
-      return icon .. item.path
-    end,
-  }, function(choice)
+  local function delete(choice)
     if not choice then return end
 
-    -- Confirm
     vim.ui.input({ prompt = 'Delete "' .. choice.path .. '"? (y/N): ' }, function(answer)
       if answer ~= 'y' and answer ~= 'Y' then return end
 
@@ -948,12 +980,27 @@ function M.delete_entity()
         end
         config.log('info', 'Deleted: %s', choice.path)
         vim.schedule(function()
+          close_documents_under(choice)
+          sync.remove_path(choice.path)
           project.remove_entry(choice.id)
-          require('overleaf.tree').refresh()
+          refresh_trees()
         end)
       end)
     end)
-  end)
+  end
+
+  if entry then
+    delete(entry)
+    return
+  end
+
+  vim.ui.select(project._project_tree, {
+    prompt = 'Delete:',
+    format_item = function(item)
+      local icon = item.type == 'folder' and '[dir] ' or ''
+      return icon .. item.path
+    end,
+  }, delete)
 end
 
 function M.history()

@@ -55,6 +55,62 @@ function M.file_path(doc_path)
   return M._sync_dir .. '/' .. doc_path
 end
 
+--- Create a path in the local mirror after a successful remote create.
+---@param doc_path string
+---@param directory? boolean
+function M.create_path(doc_path, directory)
+  local path = M.file_path(doc_path)
+  if not path then return end
+  if directory then
+    vim.fn.mkdir(path, 'p')
+    return
+  end
+  if vim.fn.filereadable(path) == 1 then return end
+  vim.fn.mkdir(vim.fn.fnamemodify(path, ':h'), 'p')
+  local file = io.open(path, 'w')
+  if file then file:close() end
+end
+
+local function stop_path_watchers(path)
+  for watched_path, watcher in pairs(M._watchers) do
+    if watched_path == path or watched_path:sub(1, #path + 1) == path .. '/' then
+      if watcher.handle and not watcher.handle:is_closing() then
+        watcher.handle:stop()
+        watcher.handle:close()
+      end
+      if watcher.doc_id and M._write_timers[watcher.doc_id] then
+        vim.fn.timer_stop(M._write_timers[watcher.doc_id])
+        M._write_timers[watcher.doc_id] = nil
+      end
+      M._watchers[watched_path] = nil
+      M._writing[watched_path] = nil
+      M._self_writes[watched_path] = nil
+    end
+  end
+end
+
+--- Remove a remote-deleted path from the local mirror.
+---@param doc_path string
+function M.remove_path(doc_path)
+  local path = M.file_path(doc_path:gsub('/$', ''))
+  if not path then return end
+  stop_path_watchers(path)
+  vim.fn.delete(path, 'rf')
+end
+
+--- Rename a path in the local mirror after the remote rename succeeds.
+---@param old_doc_path string
+---@param new_doc_path string
+function M.rename_path(old_doc_path, new_doc_path)
+  local old_path = M.file_path(old_doc_path:gsub('/$', ''))
+  local new_path = M.file_path(new_doc_path:gsub('/$', ''))
+  if not old_path or not new_path or old_path == new_path then return end
+  stop_path_watchers(old_path)
+  vim.fn.mkdir(vim.fn.fnamemodify(new_path, ':h'), 'p')
+  local ok, err = os.rename(old_path, new_path)
+  if not ok then config.log('warn', 'Could not rename mirror path %s: %s', old_doc_path, tostring(err)) end
+end
+
 --- Get the buffer name for a document.
 --- Returns the real file path when sync_dir is enabled, otherwise overleaf:// URI.
 ---@param doc_path string Overleaf document path

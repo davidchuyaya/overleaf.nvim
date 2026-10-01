@@ -186,9 +186,11 @@ require('overleaf').setup({
 
 With both `sync_dir` and `tree_provider = 'neo-tree'`, the Overleaf tree uses
 Neo-tree's filesystem view. Document opens are routed back through Overleaf's
-live OT buffers, and mirror-changing operations are blocked in favor of the
-plugin's remote file commands. `explorer_key` opens the Overleaf-scoped tree
-while connected and the normal working-directory explorer otherwise.
+live OT buffers. Creating, renaming, and deleting entries from Neo-tree is
+routed through Overleaf and then reflected in the local mirror; local-only
+copy and move operations remain blocked. `explorer_key` opens the
+Overleaf-scoped tree while connected and the normal working-directory explorer
+otherwise.
 
 ## Workflow
 

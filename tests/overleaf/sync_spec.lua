@@ -34,4 +34,28 @@ describe('sync file watcher', function()
     config._config = original_config
     vim.fn.delete(sync_root, 'rf')
   end)
+
+  it('creates, renames, and removes mirror paths', function()
+    local sync_root = vim.fn.tempname()
+    local original_config = vim.deepcopy(config._config)
+
+    config.setup({ sync_dir = sync_root })
+    sync.start('project')
+
+    sync.create_path('sections/', true)
+    sync.create_path('sections/main.tex', false)
+    assert.are.equal(1, vim.fn.isdirectory(sync._sync_dir .. '/sections'))
+    assert.are.equal(1, vim.fn.filereadable(sync._sync_dir .. '/sections/main.tex'))
+
+    sync.rename_path('sections/', 'chapters/')
+    assert.are.equal(0, vim.fn.isdirectory(sync._sync_dir .. '/sections'))
+    assert.are.equal(1, vim.fn.filereadable(sync._sync_dir .. '/chapters/main.tex'))
+
+    sync.remove_path('chapters/')
+    assert.are.equal(0, vim.fn.isdirectory(sync._sync_dir .. '/chapters'))
+
+    sync.stop()
+    config._config = original_config
+    vim.fn.delete(sync_root, 'rf')
+  end)
 end)

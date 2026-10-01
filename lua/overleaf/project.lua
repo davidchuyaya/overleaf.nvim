@@ -160,13 +160,16 @@ end
 
 --- Remove an entry from the tree by ID
 function M.remove_entry(entity_id)
-  for i, entry in ipairs(M._project_tree) do
-    if entry.id == entity_id then
+  local target = M.get_doc_by_id(entity_id)
+  if not target then return false end
+
+  for i = #M._project_tree, 1, -1 do
+    local entry = M._project_tree[i]
+    if entry.id == entity_id or (target.type == 'folder' and entry.path:sub(1, #target.path) == target.path) then
       table.remove(M._project_tree, i)
-      return true
     end
   end
-  return false
+  return true
 end
 
 --- Get the path prefix for a parent folder
