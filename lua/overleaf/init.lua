@@ -53,6 +53,13 @@ function M._viewer_command(file_path)
     return cmd
   end
   if type(viewer) == 'string' and viewer:lower() == 'skim' then return { 'open', '-a', 'Skim', file_path } end
+  if type(viewer) == 'string' and viewer:lower() == 'sioyek' then
+    local executable = vim.fn.has('mac') == 1 and '/Applications/sioyek.app/Contents/MacOS/sioyek' or 'sioyek'
+    -- Reopening an existing file can reuse Sioyek's cached document and miss
+    -- its short auto-reload timing window. Explicitly reload the target PDF
+    -- after the download is complete; do not expose a partially written file.
+    return { executable, '--reuse-window', '--execute-command', 'reload', file_path }
+  end
   if viewer then return { viewer, file_path } end
   if vim.fn.has('mac') == 1 then return { 'open', file_path } end
   if vim.fn.has('wsl') == 1 then return { 'wslview', file_path } end

@@ -153,7 +153,7 @@ require('overleaf').setup({
   -- Path to Node.js binary (default: 'node')
   node_path = 'node',
 
-  -- PDF viewer executable, or 'skim' to launch the macOS Skim app.
+  -- PDF viewer executable, 'skim' for macOS Skim, or 'sioyek' for explicit reloads.
   pdf_viewer = 'skim',
 
   -- Compile whenever an Overleaf buffer is written (default: true)
@@ -183,6 +183,13 @@ require('overleaf').setup({
   keys = true,
 })
 ```
+
+Set `pdf_viewer = 'sioyek'` to explicitly reload the PDF after every completed
+download instead of relying on Sioyek's automatic reload timing. On macOS,
+install the app at `/Applications/sioyek.app`; elsewhere, `sioyek` must be on
+`PATH`. For a custom installation, use a command table such as
+`{ '/custom/path/sioyek', '--reuse-window', '--execute-command', 'reload' }`.
+The downloaded PDF path is appended as one argument.
 
 With both `sync_dir` and `tree_provider = 'neo-tree'`, the Overleaf tree uses
 Neo-tree's filesystem view. Document opens are routed back through Overleaf's
