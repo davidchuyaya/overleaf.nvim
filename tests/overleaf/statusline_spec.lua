@@ -182,4 +182,71 @@ describe('confirmed project sync status', function()
     assert.are.equal('2 days ago', status.relative_time(100, 172900))
     assert.are.equal('just now', status.relative_time(200, 100))
   end)
+
+  it('waits for applied confirmation for externally changed mirrors with no buffer', function()
+    local doc = document()
+    doc.joined = false
+    require('overleaf.sync')._sync_closed_doc(doc, 'External')
+    assert.are.equal('joinDoc', sent[1].method)
+    assert.are.equal('syncing', status.snapshot().kind)
+    sent[1].callback(nil, { lines = { 'Hello' }, version = 0 })
+    assert.are.equal('applyOtUpdate', sent[2].method)
+    sent[2].callback(nil, {})
+    assert.are.equal('Hello', doc.server_content)
+    assert.are.equal('syncing', status.snapshot().kind)
+    ack(doc, 0)
+    assert.are.equal('External', doc.server_content)
+    assert.are.equal('synced', status.snapshot().kind)
+    assert.is_true(doc.joined)
+  end)
+
+  it('coalesces external changes during join and serializes later edits behind their applied ACK', function()
+    local doc = document()
+    doc.joined = false
+    local sync = require('overleaf.sync')
+    sync._sync_closed_doc(doc, 'First')
+    sync._sync_closed_doc(doc, 'Second')
+    assert.are.equal(1, #sent)
+    sent[1].callback(nil, { lines = { 'Hello' }, version = 0 })
+    assert.are.equal('Second', doc.content)
+    sync._sync_closed_doc(doc, 'Third')
+    assert.are.equal(2, #sent)
+    ack(doc, 0)
+    assert.are.equal('Second', doc.server_content)
+    assert.are.equal(3, #sent)
+    assert.are.equal('syncing', status.snapshot().kind)
+    ack(doc, 1)
+    assert.are.equal('Third', doc.server_content)
+    assert.are.equal('synced', status.snapshot().kind)
+  end)
+
+  it('shares a pending mirror join with a user open instead of losing its in-flight edit', function()
+    local doc = document()
+    doc.joined = false
+    require('overleaf.sync')._sync_closed_doc(doc, 'External')
+    local callback = function() end
+    overleaf.open_document('main', 'main.tex', callback, { display = false })
+    assert.are.equal(doc, overleaf._state.documents.main)
+    assert.are.equal(callback, doc._external_open_request.callback)
+    -- Exercise the handoff without creating a real LSP-backed buffer here.
+    local original_open = overleaf.open_document
+    local handoff
+    overleaf.open_document = function(id, path, on_open, opts)
+      handoff = { id = id, path = path, callback = on_open, display = opts.display }
+    end
+    sent[1].callback(nil, { lines = { 'Hello' }, version = 0 })
+    overleaf.open_document = original_open
+    assert.are.same({ id = 'main', path = 'main.tex', callback = callback, display = false }, handoff)
+    assert.is_not_nil(doc.inflight_op)
+    ack(doc, 0)
+    assert.are.equal('synced', status.snapshot().kind)
+  end)
+
+  it('waits for confirmation of a mirror edit on exit even when it has no buffer', function()
+    local doc = document()
+    edit(doc, { { p = 5, i = '!' } })
+    assert.is_false(overleaf.flush_all(10))
+    ack(doc, 0)
+    assert.is_true(overleaf.flush_all(10))
+  end)
 end)

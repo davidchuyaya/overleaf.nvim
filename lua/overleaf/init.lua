@@ -681,6 +681,12 @@ function M.open_document(doc_id_or_path, doc_path, on_open, opts)
   if M._state.documents[doc_id] then
     local existing = M._state.documents[doc_id]
     if existing._opening then return end
+    if existing._external_joining then
+      -- Share the mirror's pending join instead of replacing its Document and
+      -- losing the applied ACK for an external edit already being submitted.
+      existing._external_open_request = { callback = on_open, opts = opts }
+      return
+    end
     if
       existing.bufnr
       and vim.api.nvim_buf_is_valid(existing.bufnr)
@@ -1600,9 +1606,16 @@ end
 function M.flush_all(timeout_ms)
   local open_docs = {}
   for _, doc in pairs(M._state.documents) do
-    if doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr) then
+    if
+      (doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr))
+      or doc.pending_ops
+      or doc.inflight_op
+      or doc._external_joining
+      or doc._external_target ~= nil
+      or doc._sync_uncertain
+    then
       table.insert(open_docs, doc)
-      sync.write_doc(doc)
+      if doc._external_target == nil then sync.write_doc(doc) end
 
       if doc._flush_timer then
         vim.fn.timer_stop(doc._flush_timer)
@@ -1621,6 +1634,8 @@ function M.flush_all(timeout_ms)
         or doc.inflight_op
         or doc._rejoining
         or doc._sync_uncertain
+        or doc._external_joining
+        or doc._external_target ~= nil
         or doc.content ~= doc.server_content
       then
         return false

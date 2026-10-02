@@ -255,7 +255,7 @@ function M._on_file_changed(path, doc)
 
   config.log('debug', 'External change: %s', doc.path)
 
-  if doc.joined and doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr) then
+  if doc.joined and doc.bufnr and vim.api.nvim_buf_is_loaded(doc.bufnr) then
     -- Doc is open in Neovim: replace buffer content (triggers on_bytes → OT)
     local lines = vim.split(new_content, '\n', { plain = true })
     vim.api.nvim_buf_set_lines(doc.bufnr, 0, -1, false, lines)
@@ -265,50 +265,47 @@ function M._on_file_changed(path, doc)
   end
 end
 
---- Sync a changed file for a document that is not open in Neovim
+--- Sync a changed mirror through the same confirmed OT path as live buffers.
 ---@param doc table Document instance
 ---@param new_content string new file content
 function M._sync_closed_doc(doc, new_content)
-  bridge.request('joinDoc', { docId = doc.doc_id }, function(err, result)
-    if err then
-      config.log('error', 'Sync join failed for %s: %s', doc.path, err.message)
-      return
-    end
-
-    local server_content = table.concat(result.lines, '\n')
-    local version = result.version
-
-    -- No change from server's perspective
-    if new_content == server_content then
-      bridge.request('leaveDoc', { docId = doc.doc_id }, function() end)
-      return
-    end
-
-    -- Build OT ops: delete all, then insert all
+  doc._external_target = new_content
+  require('overleaf.statusline').changed()
+  local function submit()
+    local target = doc._external_target
+    doc._external_target = nil
+    if target == doc.content then return end
+    -- Compose with any unconfirmed local edit instead of issuing a second,
+    -- independent applyOtUpdate request that could consume its ACK.
     local ops = {}
-    if #server_content > 0 then table.insert(ops, { p = 0, d = server_content }) end
-    if #new_content > 0 then table.insert(ops, { p = 0, i = new_content }) end
-
-    bridge.request('applyOtUpdate', {
-      docId = doc.doc_id,
-      op = ops,
-      v = version,
-      content = server_content,
-    }, function(ot_err, _)
-      if ot_err then
-        config.log('error', 'Sync OT failed for %s: %s', doc.path, ot_err.message)
+    if #doc.content > 0 then table.insert(ops, { p = 0, d = doc.content }) end
+    if #target > 0 then table.insert(ops, { p = 0, i = target }) end
+    doc.content = target
+    doc:submit_op(ops)
+    doc:flush()
+  end
+  if doc.joined and not doc._rejoining then
+    submit()
+  elseif not doc._external_joining and not doc._rejoining then
+    doc._external_joining = true
+    doc:join(function(err)
+      doc._external_joining = nil
+      if err then
+        doc._sync_uncertain = true
+        require('overleaf.statusline').changed()
       else
-        config.log('debug', 'Synced external change: %s', doc.path)
-        -- Update doc state
-        doc.content = new_content
-        doc.server_content = new_content
-        doc.version = (version or 0) + 1
+        -- Keep the document joined: its applied ACK and subsequent remote edits
+        -- must be observed even though no Neovim buffer is currently displayed.
+        submit()
       end
-
-      -- Leave the doc
-      bridge.request('leaveDoc', { docId = doc.doc_id }, function() end)
+      local open = doc._external_open_request
+      doc._external_open_request = nil
+      local overleaf = require('overleaf')
+      if open and overleaf._state.connected and overleaf._state.documents[doc.doc_id] == doc then
+        overleaf.open_document(doc.doc_id, doc.path, open.callback, open.opts)
+      end
     end)
-  end)
+  end
 end
 
 --- Download a binary file (image, etc.) to the sync directory
@@ -474,7 +471,7 @@ function M.import_all(state)
 
       if disk_content ~= doc.content then
         changed = changed + 1
-        if doc.joined and doc.bufnr and vim.api.nvim_buf_is_valid(doc.bufnr) then
+        if doc.joined and doc.bufnr and vim.api.nvim_buf_is_loaded(doc.bufnr) then
           local lines = vim.split(disk_content, '\n', { plain = true })
           vim.api.nvim_buf_set_lines(doc.bufnr, 0, -1, false, lines)
         else

@@ -51,6 +51,8 @@ function M.snapshot()
       or doc.inflight_op ~= nil
       or doc.pending_ops ~= nil
       or doc._rejoining
+      or doc._external_joining
+      or doc._external_target ~= nil
       or (doc._local_revision or 0) > (doc._confirmed_revision or 0)
       or doc.content ~= doc.server_content
     -- Catch edits made while disconnected, when on_bytes cannot submit OT.
