@@ -9,6 +9,7 @@ local M = {}
 
 M._exit_cleanup_pending = false
 M._resession_hook_registered = false
+M._pdf_state = { last_path = nil, sioyek_path = nil }
 
 local function setup_exit_hooks()
   local group = vim.api.nvim_create_augroup('overleaf_exit', { clear = true })
@@ -44,8 +45,9 @@ end
 
 --- Build the command used to open a PDF or other downloaded file.
 ---@param file_path string
+---@param reload? boolean explicitly refresh Sioyek as a manual fallback
 ---@return string[]
-function M._viewer_command(file_path)
+function M._viewer_command(file_path, reload)
   local viewer = config.get().pdf_viewer
   if type(viewer) == 'table' then
     local cmd = vim.deepcopy(viewer)
@@ -55,10 +57,10 @@ function M._viewer_command(file_path)
   if type(viewer) == 'string' and viewer:lower() == 'skim' then return { 'open', '-a', 'Skim', file_path } end
   if type(viewer) == 'string' and viewer:lower() == 'sioyek' then
     local executable = vim.fn.has('mac') == 1 and '/Applications/sioyek.app/Contents/MacOS/sioyek' or 'sioyek'
-    -- Reopening an existing file can reuse Sioyek's cached document and miss
-    -- its short auto-reload timing window. Explicitly reload the target PDF
-    -- after the download is complete; do not expose a partially written file.
-    return { executable, '--reuse-window', '--execute-command', 'reload', file_path }
+    local cmd = { executable, '--reuse-window' }
+    if reload then vim.list_extend(cmd, { '--execute-command', 'reload' }) end
+    table.insert(cmd, file_path)
+    return cmd
   end
   if viewer then return { viewer, file_path } end
   if vim.fn.has('mac') == 1 then return { 'open', file_path } end
@@ -66,9 +68,52 @@ function M._viewer_command(file_path)
   return { 'xdg-open', file_path }
 end
 
---- Open a file with the configured viewer or platform default.
+--- Show a completed PDF; Sioyek handles later file replacements itself.
 ---@param file_path string
-local function open_file(file_path) vim.fn.jobstart(M._viewer_command(file_path), { detach = true }) end
+---@param opts? table {automatic?, reload?}
+function M._show_pdf(file_path, opts)
+  opts = opts or {}
+  local viewer = config.get().pdf_viewer
+  local sioyek = type(viewer) == 'string' and viewer:lower() == 'sioyek'
+  if opts.automatic and sioyek and M._pdf_state.sioyek_path == file_path then return end
+
+  local launch = {}
+  local ok, job = pcall(vim.fn.jobstart, M._viewer_command(file_path, opts.reload), {
+    detach = true,
+    on_exit = function(_, code)
+      if code ~= 0 then
+        vim.schedule(function()
+          if sioyek and M._pdf_state.launch == launch then M._pdf_state.sioyek_path = nil end
+          config.log('error', 'PDF viewer exited with status %d; retry with :Overleaf pdf', code)
+        end)
+      end
+    end,
+  })
+  if not ok or job <= 0 then
+    if sioyek then M._pdf_state.sioyek_path = nil end
+    config.log('error', 'Could not start PDF viewer: %s', tostring(job))
+    return
+  end
+  if sioyek then
+    M._pdf_state.sioyek_path = file_path
+    M._pdf_state.launch = launch
+  end
+end
+
+--- Manually reopen or force-refresh the most recently downloaded PDF.
+---@param action? 'reload'
+function M.view_pdf(action)
+  if action and action ~= 'reload' then
+    config.log('warn', 'Unknown PDF action: %s (expected reload)', action)
+    return
+  end
+  local path = M._pdf_state.last_path
+  if not path or vim.fn.filereadable(path) ~= 1 then
+    config.log('warn', 'No downloaded PDF available. Compile the project first.')
+    return
+  end
+  M._show_pdf(path, { reload = action == 'reload' })
+end
 
 M._state = {
   connected = false,
@@ -1177,7 +1222,8 @@ function M._open_pdf(output_files)
       config.log('error', 'PDF download failed: %s', err.message)
       return
     end
-    vim.schedule(function() open_file(result.path) end)
+    M._pdf_state.last_path = result.path
+    vim.schedule(function() M._show_pdf(result.path, { automatic = true }) end)
   end)
 end
 

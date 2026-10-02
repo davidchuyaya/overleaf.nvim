@@ -99,6 +99,7 @@ To get the cookie manually: open overleaf.com in your browser → DevTools (F12)
 | `:Overleaf connect` | Connect to Overleaf |
 | `:Overleaf disconnect` | Disconnect |
 | `:Overleaf compile [fast\|normal]` | Compile LaTeX project (normal by default) |
+| `:Overleaf pdf [reload]` | Reopen the downloaded PDF, or force a Sioyek refresh |
 | `:Overleaf tree` | Toggle file tree |
 | `:Overleaf projects` | Switch project |
 | `:Overleaf status` | Show connection status |
@@ -153,7 +154,7 @@ require('overleaf').setup({
   -- Path to Node.js binary (default: 'node')
   node_path = 'node',
 
-  -- PDF viewer executable, 'skim' for macOS Skim, or 'sioyek' for explicit reloads.
+  -- PDF viewer executable, 'skim' for macOS Skim, or 'sioyek' for automatic reloads.
   pdf_viewer = 'skim',
 
   -- Compile whenever an Overleaf buffer is written (default: true)
@@ -184,12 +185,19 @@ require('overleaf').setup({
 })
 ```
 
-Set `pdf_viewer = 'sioyek'` to explicitly reload the PDF after every completed
-download instead of relying on Sioyek's automatic reload timing. On macOS,
-install the app at `/Applications/sioyek.app`; elsewhere, `sioyek` must be on
-`PATH`. For a custom installation, use a command table such as
-`{ '/custom/path/sioyek', '--reuse-window', '--execute-command', 'reload' }`.
-The downloaded PDF path is appended as one argument.
+With `pdf_viewer = 'sioyek'`, the plugin opens the PDF on the first successful
+compile. Further compiles only replace the file atomically; Sioyek's automatic
+reload handles the update without a forced cache-clearing reload or repeated
+open commands. Switching to a different PDF opens that file. On macOS, install
+the app at `/Applications/sioyek.app`; elsewhere, `sioyek` must be on `PATH`.
+Automatic reload still depends on Sioyek detecting the file change.
+
+Use `:Overleaf pdf` to reopen the last downloaded PDF if you closed the viewer,
+or `:Overleaf pdf reload` to force a refresh if automatic reload misses an
+update (the forced refresh can blink). Other viewers and custom command tables
+keep their existing open-after-every-compile behavior. For example,
+`{ '/custom/path/sioyek', '--reuse-window', '--execute-command', 'reload' }`
+forces a reload after each compile; the PDF path is appended as one argument.
 
 With both `sync_dir` and `tree_provider = 'neo-tree'`, the Overleaf tree uses
 Neo-tree's filesystem view. Document opens are routed back through Overleaf's

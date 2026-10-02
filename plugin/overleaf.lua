@@ -3,6 +3,7 @@ local subcommands = {
   connect = function() require('overleaf').connect() end,
   disconnect = function() require('overleaf').disconnect() end,
   compile = function(args) require('overleaf').compile(args) end,
+  pdf = function(args) require('overleaf').view_pdf(args) end,
   tree = function() require('overleaf').toggle_tree() end,
   projects = function() require('overleaf').select_project() end,
   status = function() require('overleaf').status() end,
@@ -72,6 +73,7 @@ end, {
     -- Complete subcommand arguments
     local sub = parts[2]
     if sub == 'compile' then return { 'fast', 'normal' } end
+    if sub == 'pdf' then return { 'reload' } end
     if sub == 'comments' then return { 'refresh' } end
     if sub == 'sync' then return { 'import', 'export' } end
     return {}
