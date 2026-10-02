@@ -7,6 +7,7 @@ local subcommands = {
   tree = function() require('overleaf').toggle_tree() end,
   projects = function() require('overleaf').select_project() end,
   status = function() require('overleaf').status() end,
+  jump = function() require('overleaf').jump_to_collaborator() end,
   new = function(args) require('overleaf').create_doc(args) end,
   mkdir = function(args) require('overleaf').create_folder(args) end,
   delete = function() require('overleaf').delete_entity() end,

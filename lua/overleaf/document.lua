@@ -18,6 +18,8 @@ function Document.new(doc_id, path)
   self.pending_ops = nil -- local ops not yet sent
   self.applying_remote = false
   self._flush_timer = nil
+  self._local_revision = 0
+  self._confirmed_revision = 0
   return self
 end
 
@@ -43,6 +45,7 @@ function Document:join(callback)
 end
 
 function Document:leave(callback)
+  self:_stop_ack_timer()
   if not self.joined then
     if callback then callback(nil) end
     return
@@ -63,6 +66,7 @@ end
 
 function Document:submit_op(ops)
   if not self.joined or self._rejoining then return end
+  self._local_revision = self._local_revision + 1
 
   if self.pending_ops then
     self.pending_ops = ot.compose(self.pending_ops, ops)
@@ -71,6 +75,7 @@ function Document:submit_op(ops)
   end
 
   self:_schedule_flush()
+  require('overleaf.statusline').changed()
 end
 
 function Document:_schedule_flush()
@@ -92,6 +97,18 @@ function Document:flush()
 
   self.inflight_op = self.pending_ops
   self.pending_ops = nil
+  self._inflight_revision = self._local_revision
+  local revision = self._inflight_revision
+  self:_stop_ack_timer()
+  self._ack_timer = vim.fn.timer_start(30000, function()
+    self._ack_timer = nil
+    if self.inflight_op and self._inflight_revision == revision then
+      -- Keep the operation: a missing ACK must not silently discard edits.
+      self._ack_stalled = true
+      require('overleaf.statusline').changed()
+      config.log('warn', 'Still waiting for Overleaf to confirm edits to %s', self.path)
+    end
+  end)
 
   bridge.request('applyOtUpdate', {
     docId = self.doc_id,
@@ -99,27 +116,47 @@ function Document:flush()
     v = self.version,
     content = self.server_content,
   }, function(err, _)
+    -- The applied event may precede this RPC response (or a later error).
+    if not self.inflight_op or self._inflight_revision ~= revision then return end
     if err then
       config.log('warn', 'OT update failed for %s: %s — rejoining', self.path, err.message)
-      self.inflight_op = nil
-      self.pending_ops = nil
       self:rejoin()
       return
     end
-    self:_on_ack()
+    -- RPC success only confirms queue ingestion. otUpdateApplied confirms
+    -- that document-updater actually applied our operation upstream.
   end)
 end
 
-function Document:_on_ack()
+function Document:_stop_ack_timer()
+  if self._ack_timer then vim.fn.timer_stop(self._ack_timer) end
+  self._ack_timer = nil
+  self._ack_stalled = nil
+end
+
+function Document:_on_ack(update)
+  if not self.joined or not self.inflight_op then return false end
+  if not update or type(update.v) ~= 'number' then return false end
+  if update.v < self.version then return false end -- duplicate / stale ACK
+  if update.v ~= self.version then
+    self:rejoin()
+    return false
+  end
+  self:_stop_ack_timer()
   -- Update server_content with the acked operation
   self.server_content = ot.apply(self.server_content, self.inflight_op)
   self.version = self.version + 1
   self.inflight_op = nil
+  self._confirmed_revision = self._inflight_revision
+  self._inflight_revision = nil
+  self._last_ack_at = os.time()
+  require('overleaf.statusline').acknowledged(self._last_ack_at)
 
   config.log('debug', 'ACK received for %s, now v%d', self.path, self.version)
 
   -- Flush next pending if any
   if self.pending_ops then self:flush() end
+  return true
 end
 
 --- Rejoin document to resync state (e.g., after version mismatch or restore)
@@ -127,10 +164,18 @@ end
 function Document:rejoin(attempt)
   attempt = attempt or 1
   if self._rejoining and attempt == 1 then return end
+  if self.inflight_op or self.pending_ops or self.content ~= self.server_content then
+    -- Recovery currently reloads the server snapshot. Never label discarded,
+    -- unconfirmed local edits as successfully synced after that reload.
+    self._sync_uncertain = true
+  end
+  self:_stop_ack_timer()
   self._rejoining = true
   self.joined = false
   self.inflight_op = nil
   self.pending_ops = nil
+  self._inflight_revision = nil
+  require('overleaf.statusline').changed()
 
   -- Delays: 3s, 8s, 15s, 25s, 40s (total ~90s)
   local delays = { 3000, 8000, 15000, 25000, 40000 }

@@ -150,6 +150,7 @@ function M.setup(opts)
   require('overleaf.dependencies').setup()
   require('overleaf.live_buffers').setup()
   require('overleaf.cursors').setup()
+  require('overleaf.statusline').setup()
 
   if config.get().tree_provider == 'neo-tree' then
     require('overleaf.neo_tree').setup()
@@ -168,6 +169,7 @@ function M.setup(opts)
     pcall(vim.keymap.del, 'n', '<leader>o')
     map('n', '<leader>oc', function() M.connect() end, { desc = 'Overleaf: Connect' })
     map('n', '<leader>od', function() M.disconnect() end, { desc = 'Overleaf: Disconnect' })
+    map('n', '<leader>oj', function() M.jump_to_collaborator() end, { desc = 'Overleaf: Jump to collaborator' })
     map('n', '<leader>ob', function() M.compile('normal') end, { desc = 'Overleaf: Build (normal)' })
     map('n', '<leader>of', function() M.compile('fast') end, { desc = 'Overleaf: Build (fast draft)' })
     map('n', '<leader>ot', function() M.toggle_tree() end, { desc = 'Overleaf: Toggle tree' })
@@ -176,6 +178,8 @@ function M.setup(opts)
     map('n', '<leader>ox', function() M.resolve_comment() end, { desc = 'Overleaf: Resolve/reopen comment' })
   end
 end
+
+function M.jump_to_collaborator() require('overleaf.cursors').jump() end
 
 function M.connect()
   config.log('info', 'Starting bridge...')
@@ -296,6 +300,7 @@ function M._connect_project(cookie, project_id, project_name)
     M._state.project_name = project_name
     M._state.project_data = result.project
     M._state.public_id = result.publicId
+    require('overleaf.statusline').reset()
     require('overleaf.cursors').clear_all()
     require('overleaf.cursors').load_collaborators()
 
@@ -323,12 +328,12 @@ end
 
 function M._setup_event_handlers()
   bridge.on_event('otUpdateApplied', function(data)
-    -- Skip own-ACK events (no op field = acknowledgment for our own op)
-    -- Our ACK is already handled by the applyOtUpdate callback → _on_ack()
-    if not data.op then return end
-
     local doc = M._state.documents[data.doc]
     if doc then
+      if not data.op or data.op == vim.NIL then
+        doc:_on_ack(data)
+        return
+      end
       doc:on_remote_op(data, function(transformed_ops)
         buffer.apply_remote(doc, transformed_ops)
         sync.schedule_write(doc)
@@ -348,6 +353,7 @@ function M._setup_event_handlers()
   bridge.on_event('disconnect', function(data)
     if M._state.connected then config.log('warn', 'Disconnected: %s — reconnecting...', data.reason or 'unknown') end
     M._state.connected = false
+    require('overleaf.statusline').changed()
     M._attempt_reconnect()
   end)
 
@@ -374,6 +380,8 @@ function M._setup_event_handlers()
           M._state.documents[old_id] = nil
           M._state.documents[new_id] = old_doc
           old_doc.doc_id = new_id
+          old_doc:_stop_ack_timer()
+          if old_doc.inflight_op or old_doc.pending_ops then old_doc._sync_uncertain = true end
           old_doc.joined = false
           old_doc.inflight_op = nil
           old_doc.pending_ops = nil
@@ -644,8 +652,6 @@ function M._rejoin_documents()
       -- Reset all state for clean rejoin
       doc._rejoining = false
       doc.joined = false
-      doc.inflight_op = nil
-      doc.pending_ops = nil
       if doc._flush_timer then
         vim.fn.timer_stop(doc._flush_timer)
         doc._flush_timer = nil
@@ -1610,7 +1616,15 @@ function M.flush_all(timeout_ms)
 
   local function synced()
     for _, doc in ipairs(open_docs) do
-      if doc.pending_ops or doc.inflight_op or doc._rejoining or doc.content ~= doc.server_content then return false end
+      if
+        doc.pending_ops
+        or doc.inflight_op
+        or doc._rejoining
+        or doc._sync_uncertain
+        or doc.content ~= doc.server_content
+      then
+        return false
+      end
     end
     return true
   end
@@ -1676,6 +1690,7 @@ function M.disconnect()
   M._state.project_data = nil
   M._state.public_id = nil
   M._state.csrf_token = nil
+  require('overleaf.statusline').reset()
 
   config.log('info', 'Disconnected')
 end

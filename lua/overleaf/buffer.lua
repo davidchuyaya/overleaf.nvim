@@ -57,6 +57,21 @@ function M.create(doc, lines, opts)
   doc.bufnr = bufnr
   local group = vim.api.nvim_create_augroup('OverleafBuffer' .. bufnr, { clear = true })
 
+  -- A mirror's FileType hooks can start AstroNvim's server after our fallback.
+  -- Keep one client per server on this buffer, without stopping shared clients
+  -- or altering LSP configuration for ordinary, non-Overleaf files.
+  vim.api.nvim_create_autocmd('LspAttach', {
+    buffer = bufnr,
+    group = group,
+    callback = function(args)
+      local client = vim.lsp.get_client_by_id(args.data.client_id)
+      if not client or not ({ texlab = true, ltex = true, harper_ls = true })[client.name] then return end
+      vim.schedule(function()
+        if doc.bufnr == bufnr and doc._buffer_attached then M._dedupe_lsp(bufnr, client.name) end
+      end)
+    end,
+  })
+
   -- :w clears the modified flag; compilation on write is optional because
   -- auto-save plugins can otherwise trigger it repeatedly while editing.
   vim.api.nvim_create_autocmd('BufWriteCmd', {
@@ -143,7 +158,17 @@ function M.create(doc, lines, opts)
   return bufnr
 end
 
---- Manually attach LSP servers to an Overleaf buffer
+--- Keep one client of a given server on this Overleaf buffer only.
+function M._dedupe_lsp(bufnr, name)
+  local clients = vim.lsp.get_clients({ bufnr = bufnr, name = name, _uninitialized = true })
+  table.sort(clients, function(a, b) return a.id < b.id end)
+  for i = 2, #clients do
+    vim.lsp.buf_detach_client(bufnr, clients[i].id)
+  end
+  return clients[1]
+end
+
+--- Manually attach LSP servers only when editor integration has not done so.
 function M._attach_lsp(bufnr, ft)
   if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
 
@@ -174,23 +199,28 @@ function M._attach_lsp(bufnr, ft)
   local mason_bin = vim.fn.stdpath('data') .. '/mason/bin/'
 
   for _, srv in ipairs(servers) do
-    local cmd = srv.cmd[1]
-    -- Check system PATH and mason bin
-    if vim.fn.executable(cmd) ~= 1 then
-      local mason_cmd = mason_bin .. cmd
-      if vim.fn.executable(mason_cmd) == 1 then srv.cmd[1] = mason_cmd end
-    end
-    -- Skip if command not found anywhere
-    if vim.fn.executable(srv.cmd[1]) ~= 1 then
-      config.log('debug', 'LSP %s not found, skipping', srv.name)
-    else
-      pcall(vim.lsp.start, {
-        name = srv.name,
-        cmd = srv.cmd,
-        root_dir = root_dir,
-        settings = srv.settings,
-        get_language_id = function(_, filetype) return lang_id_map[filetype] or filetype end,
-      }, { bufnr = bufnr })
+    -- Root detection for ordinary mirror files can differ from our explicit
+    -- project root. vim.lsp.start's default reuse rule then starts a duplicate.
+    -- An already attached client (even while initializing) is sufficient.
+    if not M._dedupe_lsp(bufnr, srv.name) then
+      local cmd = srv.cmd[1]
+      -- Check system PATH and mason bin
+      if vim.fn.executable(cmd) ~= 1 then
+        local mason_cmd = mason_bin .. cmd
+        if vim.fn.executable(mason_cmd) == 1 then srv.cmd[1] = mason_cmd end
+      end
+      -- Skip if command not found anywhere
+      if vim.fn.executable(srv.cmd[1]) ~= 1 then
+        config.log('debug', 'LSP %s not found, skipping', srv.name)
+      else
+        pcall(vim.lsp.start, {
+          name = srv.name,
+          cmd = srv.cmd,
+          root_dir = root_dir,
+          settings = srv.settings,
+          get_language_id = function(_, filetype) return lang_id_map[filetype] or filetype end,
+        }, { bufnr = bufnr })
+      end
     end
   end
 end

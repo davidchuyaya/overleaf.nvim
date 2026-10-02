@@ -18,6 +18,22 @@ function fixture() {
   return { manager, listeners, emitted };
 }
 
+test('applied edit confirmations are forwarded separately from queue responses', () => {
+  const { manager, listeners } = fixture();
+  const events = [];
+  manager.sendEvent = (event, data) => events.push({ event, data });
+  listeners.otUpdateApplied({ doc: 'main', v: 42 });
+  assert.deepEqual(events, [{ event: 'otUpdateApplied', data: { doc: 'main', v: 42 } }]);
+});
+
+test('upstream OT errors retain the document identifier from server context', () => {
+  const { manager, listeners } = fixture();
+  const events = [];
+  manager.sendEvent = (event, data) => events.push({ event, data });
+  listeners.otUpdateError({ message: 'hash mismatch' }, { doc_id: 'main' });
+  assert.deepEqual(events, [{ event: 'otUpdateError', data: { message: 'hash mismatch', doc: 'main' } }]);
+});
+
 test('cursor updates use the browser event without waiting for an acknowledgement', () => {
   const { manager, emitted } = fixture();
   const position = { doc_id: 'doc_main', row: 2, column: 5 };

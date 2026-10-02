@@ -3,6 +3,8 @@ local _ = require('overleaf.config')
 local M = {}
 
 M._collaborators = {} -- user_id -> { name, doc_id, row, col, color_idx }
+M._presence_revision = 0
+M._departed = {}
 M._ns = vim.api.nvim_create_namespace('overleaf_cursors')
 
 -- Color palette for collaborator cursors
@@ -39,21 +41,98 @@ local function utf16_to_byte(text, col)
   return byte
 end
 
+--- Connected editor sessions, sorted for stable statusline and picker order.
+function M.list()
+  local people = {}
+  if not require('overleaf')._state.connected then return people end
+  local project = require('overleaf.project')
+  for id, collab in pairs(M._collaborators) do
+    local entry = collab.doc_id and project.get_doc_by_id(collab.doc_id)
+    table.insert(people, {
+      id = id,
+      name = collab.name,
+      doc_id = collab.doc_id,
+      path = entry and entry.path,
+      row = collab.row,
+      col = collab.col,
+      color = COLORS[collab.color_idx].bg,
+    })
+  end
+  table.sort(people, function(a, b)
+    if a.name == b.name then return a.id < b.id end
+    return a.name < b.name
+  end)
+  return people
+end
+
+--- Jump once (not a continuous follow) to a collaborator's latest location.
+function M.jump()
+  local overleaf = require('overleaf')
+  local state = overleaf._state
+  local people = M.list()
+  if #people == 0 then
+    require('overleaf.config').log('info', 'No collaborators are currently in the project')
+    return
+  end
+  local public_id, project_id = state.public_id, state.project_id
+  local function jump_to(person)
+    if not person or not state.connected or state.public_id ~= public_id or state.project_id ~= project_id then
+      return
+    end
+    -- Follow their newest position, not the stale picker snapshot.
+    local collab = M._collaborators[person.id]
+    local entry = collab and collab.doc_id and require('overleaf.project').get_doc_by_id(collab.doc_id)
+    if not entry or entry.type ~= 'doc' then
+      require('overleaf.config').log('info', '%s has no text document open', person.name)
+      return
+    end
+    local doc_id = collab.doc_id
+    overleaf.open_document(doc_id, entry.path, function(doc)
+      if not state.connected or state.public_id ~= public_id or state.project_id ~= project_id then return end
+      collab = M._collaborators[person.id]
+      if not collab or collab.doc_id ~= doc_id or not doc.bufnr or not vim.api.nvim_buf_is_loaded(doc.bufnr) then
+        return
+      end
+      vim.api.nvim_set_current_buf(doc.bufnr)
+      local row = math.max(0, math.min(collab.row, vim.api.nvim_buf_line_count(doc.bufnr) - 1))
+      local line = vim.api.nvim_buf_get_lines(doc.bufnr, row, row + 1, false)[1] or ''
+      vim.api.nvim_win_set_cursor(0, { row + 1, utf16_to_byte(line, math.max(0, collab.col)) })
+      vim.cmd('normal! zvzz')
+    end, { display = false })
+  end
+  if #people == 1 then
+    jump_to(people[1])
+  else
+    vim.ui.select(people, {
+      prompt = 'Jump to Overleaf collaborator:',
+      format_item = function(person) return person.name .. ' — ' .. (person.path or '(no file)') end,
+    }, jump_to)
+  end
+end
+
 function M.load_collaborators()
   local state = require('overleaf')._state
-  if not state.connected then return end
+  if not state.connected or M._lookup_pending then return end
   local public_id = state.public_id
+  local revision = M._presence_revision
+  local request = {}
+  M._lookup_pending = request
   require('overleaf.bridge').request('getConnectedUsers', {}, function(err, result)
+    if M._lookup_pending ~= request then return end
+    M._lookup_pending = nil
     if not state.connected or state.public_id ~= public_id then return end
     if err then
       require('overleaf.config').log('debug', 'Collaborator lookup failed: %s', err.message or '?')
       return
     end
+    local seen = {}
     for _, user in ipairs(result.users or {}) do
       local id = user.client_id or user.id
+      if id then seen[id] = true end
       -- A live event received during this request is newer than the snapshot.
-      if id and not M._collaborators[id] then
-        local position = user.cursorData or {}
+      local existing = id and M._collaborators[id]
+      if id and (not existing or existing.revision <= revision) and (M._departed[id] or 0) <= revision then
+        local position = type(user.cursorData) == 'table' and user.cursorData or {}
         local name = vim.trim((user.first_name or '') .. ' ' .. (user.last_name or ''))
         M.on_client_updated({
           id = id,
@@ -64,6 +143,9 @@ function M.load_collaborators()
           column = position.column,
         })
       end
+    end
+    for id, collab in pairs(M._collaborators) do
+      if not seen[id] and collab.revision <= revision then M.on_client_disconnected({ id = id }) end
     end
   end)
 end
@@ -145,6 +227,7 @@ function M.on_client_updated(data)
   ensure_highlights()
 
   local user_id = data.id
+  M._presence_revision = M._presence_revision + 1
   local collab = M._collaborators[user_id]
 
   if not collab then
@@ -165,9 +248,11 @@ function M.on_client_updated(data)
   collab.doc_id = data.doc_id ~= vim.NIL and data.doc_id or nil
   collab.row = data.row or 0
   collab.col = data.column or 0
+  collab.revision = M._presence_revision
 
   -- Render cursor
   M._render_cursor(user_id, collab)
+  require('overleaf.statusline').changed()
 end
 
 --- Handle clientTracking.clientDisconnected event
@@ -175,6 +260,8 @@ function M.on_client_disconnected(data)
   if not data or not data.id then return end
 
   local user_id = data.id
+  M._presence_revision = M._presence_revision + 1
+  M._departed[user_id] = M._presence_revision
   local collab = M._collaborators[user_id]
   if not collab then return end
 
@@ -191,6 +278,7 @@ function M.on_client_disconnected(data)
   end
 
   M._collaborators[user_id] = nil
+  require('overleaf.statusline').changed()
 end
 
 --- Render a single collaborator cursor as extmark
@@ -249,6 +337,9 @@ function M.clear_all()
     end
   end
   M._collaborators = {}
+  M._departed = {}
+  M._lookup_pending = nil
+  require('overleaf.statusline').changed()
 end
 
 return M

@@ -160,9 +160,13 @@ class SocketManager {
       this.sendEvent('otUpdateApplied', update);
     });
 
-    this.socket.on('otUpdateError', (err) => {
+    this.socket.on('otUpdateError', (err, context) => {
       console.log('[otUpdateError]', JSON.stringify(err));
-      this.sendEvent('otUpdateError', err);
+      this.sendEvent('otUpdateError', {
+        ...(typeof err === 'object' && err !== null ? err : {}),
+        message: err?.message || String(err),
+        doc: context?.doc_id || err?.doc,
+      });
     });
 
     this.socket.on('disconnect', (reason) => {
