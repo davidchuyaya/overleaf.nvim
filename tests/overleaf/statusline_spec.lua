@@ -132,8 +132,10 @@ describe('confirmed project sync status', function()
     edit(doc, { { p = 5, i = '!' } })
     ack(doc, 0)
     status._last_ack_at = os.time() - 120
+    local last_ack_at = status._last_ack_at
     bridge._event_handlers.otUpdateApplied[1]({ doc = 'main', v = 1, op = { { p = 6, i = ' remote' } } })
-    assert.matches('2 minutes ago', status.sync_text(status.snapshot()))
+    assert.are.equal(last_ack_at, status.snapshot().last_ack_at)
+    assert.are.equal(' ✓ ', status.sync_text(status.snapshot()))
     overleaf._state.connected = false
     assert.are.equal('offline', status.snapshot().kind)
     assert.are.same({}, status.snapshot().collaborators)
@@ -173,14 +175,20 @@ describe('confirmed project sync status', function()
     assert.are.equal('unconfirmed', status.snapshot().kind)
   end)
 
-  it('formats relative time with singular units and larger intervals', function()
-    assert.are.equal('just now', status.relative_time(100, 103))
-    assert.are.equal('10 seconds ago', status.relative_time(100, 110))
-    assert.are.equal('1 minute ago', status.relative_time(100, 160))
-    assert.are.equal('2 minutes ago', status.relative_time(100, 220))
-    assert.are.equal('1 hour ago', status.relative_time(100, 3700))
-    assert.are.equal('2 days ago', status.relative_time(100, 172900))
-    assert.are.equal('just now', status.relative_time(200, 100))
+  it('uses a fixed-width symbol for every sync state without showing elapsed time', function()
+    local symbols = { synced = '✓', syncing = '⧖', idle = '○', unconfirmed = '!', offline = '×' }
+    for kind, symbol in pairs(symbols) do
+      local text = status.sync_text({ kind = kind, last_ack_at = os.time() - 120 })
+      assert.are.equal(' ' .. symbol .. ' ', text)
+      assert.are.equal(3, vim.fn.strdisplaywidth(text))
+      assert.are.equal(text, status.sync_text({ kind = kind, last_ack_at = os.time() - 86400 }))
+    end
+  end)
+
+  it('places collaborator presence before the final sync symbol', function()
+    local component = status.component()
+    assert.are.equal(20, component[1].flexible)
+    assert.are.equal(' ✓ ', component[#component].provider({ overleaf_snapshot = { kind = 'synced' } }))
   end)
 
   it('waits for applied confirmation for externally changed mirrors with no buffer', function()

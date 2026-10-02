@@ -138,14 +138,16 @@ with their open file paths. Names use the same colors as their in-buffer cursor
 annotations. No AstroNvim configuration changes are needed. The component is
 hidden when no project is open; on narrow screens, presence contracts to a count.
 
-For example: `OL ✓ synced 2 minutes ago │ Alice · chapters/intro.tex`.
+For example: `│ Alice · chapters/intro.tex  ✓`, with the sync symbol at the
+right-hand corner after the collaborators. Every sync state occupies the same
+three display cells (a symbol with padding); no elapsed time is shown, so sync
+updates do not shift the rest of the status bar.
 The checkmark appears only when **all latest local edits** have been confirmed by
 Overleaf's `otUpdateApplied` event, not its earlier queue/API response. Pending
-edits show `… syncing`; missing confirmations or discarded edits during recovery
-show `! unconfirmed`; a disconnected project shows `offline`. Before any local
-edit has been confirmed, no successful-sync time is invented. Relative times
-update automatically, and connected users are refreshed every ten seconds to
-discover stationary editors. Remote edits do not reset your last-sync time.
+edits show `⧖`; missing confirmations or discarded edits during recovery show `!`;
+a disconnected project shows `×`. Before any local edit has been confirmed, `○`
+indicates no edits yet. Connected users are refreshed every ten seconds to
+discover stationary editors. Remote edits do not count as confirmation of yours.
 
 Use `<leader>oj` (or `:Overleaf jump`) to open a collaborator's live document at
 their latest cursor. With multiple connected editors, the normal Neovim UI picker

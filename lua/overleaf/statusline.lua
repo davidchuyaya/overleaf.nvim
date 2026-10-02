@@ -7,20 +7,6 @@ local function state() return require('overleaf')._state end
 
 local function escape(text) return tostring(text):gsub('[%c]', ' '):gsub('%%', '%%%%') end
 
-function M.relative_time(timestamp, now)
-  local seconds = math.max(0, (now or os.time()) - timestamp)
-  if seconds < 5 then return 'just now' end
-  local amount, unit = seconds, 'second'
-  if seconds >= 86400 then
-    amount, unit = math.floor(seconds / 86400), 'day'
-  elseif seconds >= 3600 then
-    amount, unit = math.floor(seconds / 3600), 'hour'
-  elseif seconds >= 60 then
-    amount, unit = math.floor(seconds / 60), 'minute'
-  end
-  return string.format('%d %s%s ago', amount, unit, amount == 1 and '' or 's')
-end
-
 function M.changed()
   if not M._attached_root or M._redraw_pending then return end
   M._redraw_pending = true
@@ -87,18 +73,16 @@ function M.snapshot()
 end
 
 function M.sync_text(snapshot)
-  local labels = {
-    synced = '✓ synced',
-    syncing = '… syncing',
-    unconfirmed = '! unconfirmed',
-    offline = 'offline',
-    idle = 'no edits yet',
+  -- Single-cell text symbols (not double-width emoji) keep every state the
+  -- same width, so confirming an edit never shifts the rest of the bar.
+  local symbols = {
+    synced = '✓',
+    syncing = '⧖',
+    unconfirmed = '!',
+    offline = '×',
+    idle = '○',
   }
-  local text = ' OL ' .. labels[snapshot.kind]
-  if snapshot.last_ack_at then
-    text = text .. (snapshot.kind == 'synced' and ' ' or ' · last sync ') .. M.relative_time(snapshot.last_ack_at)
-  end
-  return text .. ' '
+  return ' ' .. symbols[snapshot.kind] .. ' '
 end
 
 -- Public factory for users who assemble their own Heirline statusline.
@@ -107,13 +91,6 @@ function M.component()
     static = { overleaf_status = true },
     condition = function() return state().connected or state().project_id ~= nil end,
     init = function(self) self.overleaf_snapshot = M.snapshot() end,
-    {
-      provider = function(self) return M.sync_text(self.overleaf_snapshot) end,
-      hl = function(self)
-        local kind = self.overleaf_snapshot.kind
-        return { fg = kind == 'synced' and '#98c379' or kind == 'idle' and '#abb2bf' or '#e5c07b' }
-      end,
-    },
     {
       condition = function(self) return #self.overleaf_snapshot.collaborators > 0 end,
       flexible = 20,
@@ -135,6 +112,13 @@ function M.component()
           return string.format('│ %d collaborator(s) ', #self.overleaf_snapshot.collaborators)
         end,
       },
+    },
+    {
+      provider = function(self) return M.sync_text(self.overleaf_snapshot) end,
+      hl = function(self)
+        local kind = self.overleaf_snapshot.kind
+        return { fg = kind == 'synced' and '#98c379' or kind == 'idle' and '#abb2bf' or '#e5c07b' }
+      end,
     },
   }
 end
