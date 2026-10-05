@@ -151,6 +151,7 @@ function M.setup(opts)
   require('overleaf.live_buffers').setup()
   require('overleaf.cursors').setup()
   require('overleaf.statusline').setup()
+  require('overleaf.sidekick').setup()
 
   if config.get().tree_provider == 'neo-tree' then
     require('overleaf.neo_tree').setup()

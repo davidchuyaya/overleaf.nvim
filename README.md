@@ -162,6 +162,15 @@ client instead of starting another one with a different project root. Its
 fallback LSP integration also prevents duplicate TexLab attachments on live
 Overleaf buffers, without changing LSP behavior for other files.
 
+### Sidekick context
+
+With `sync_dir` enabled, Sidekick's file, line, position, and visual-selection
+prompts work on live Overleaf buffers. The plugin automatically recognizes its
+own mirrored `acwrite` buffers as Sidekick file context, preserving Overleaf's
+save/sync handling. No Sidekick source or AstroNvim configuration changes are
+needed. Other special buffers and `overleaf://` documents without a readable
+local mirror retain Sidekick's normal behavior.
+
 ### Tree Keymaps
 
 | Key | Description |
