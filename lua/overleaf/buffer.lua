@@ -231,8 +231,30 @@ end
 function M.attach(bufnr, doc)
   doc._buffer_attached = true
   doc._buffer_generation = (doc._buffer_generation or 0) + 1
+  local generation = doc._buffer_generation
   vim.api.nvim_buf_attach(bufnr, false, {
-    on_detach = function() doc._buffer_attached = false end,
+    on_detach = function()
+      if doc._buffer_generation ~= generation then return end
+      doc._buffer_attached = false
+      doc._buffer_generation = generation + 1
+      -- :edit! unloads and reloads rather than firing on_reload. Restore the
+      -- listener only if this is still the same live buffer, not a closed or
+      -- separately reopened attachment.
+      vim.schedule(function()
+        if doc.bufnr ~= bufnr or doc._buffer_generation ~= generation + 1 then return end
+        if not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then return end
+        M.attach(bufnr, doc)
+        doc:check_content()
+      end)
+    end,
+    -- Reloads can replace the entire text without ordinary on_bytes edits.
+    -- Keep the attachment and import the current buffer contents.
+    on_reload = function()
+      if doc.joined and not doc.applying_remote then
+        doc:check_content()
+        require('overleaf.sync').schedule_write(doc)
+      end
+    end,
     on_bytes = function(
       _,
       buf,
@@ -275,7 +297,24 @@ function M.attach(bufnr, doc)
           end_col = new_end_col
         end
 
+        -- Linewise replacements include Neovim's implicit final newline.
+        -- nvim_buf_get_text cannot read the one-past-last row, and the OT
+        -- model must not include that implicit newline either.
+        local line_count = vim.api.nvim_buf_line_count(buf)
+        if end_row >= line_count then
+          end_row = line_count - 1
+          end_col = #vim.api.nvim_buf_get_lines(buf, end_row, end_row + 1, false)[1]
+        end
+
         local ok, new_lines = pcall(vim.api.nvim_buf_get_text, buf, start_row, start_col, end_row, end_col, {})
+        if not ok then
+          -- Never submit just the delete half of a failed replacement.
+          local generation = doc._buffer_generation
+          vim.schedule(function()
+            if doc.bufnr == buf and doc._buffer_generation == generation then doc:check_content() end
+          end)
+          return
+        end
         if ok and new_lines then
           local inserted_text = table.concat(new_lines, '\n')
           if #inserted_text > 0 then table.insert(ops, { p = char_offset, i = inserted_text }) end
@@ -303,7 +342,9 @@ function M.apply_remote(doc, ops)
   end
 
   local bufnr, generation = doc.bufnr, doc._buffer_generation
+  doc._remote_apply_pending = (doc._remote_apply_pending or 0) + 1
   vim.schedule(function()
+    doc._remote_apply_pending = doc._remote_apply_pending - 1
     -- A reopened buffer was already populated from doc.content, including
     -- this operation. Never apply a queued operation to a newer attachment.
     if doc.bufnr ~= bufnr or doc._buffer_generation ~= generation then return end

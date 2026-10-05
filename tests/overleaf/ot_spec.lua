@@ -1,6 +1,28 @@
 local ot = require('overleaf.ot')
 
 describe('ot', function()
+  describe('snapshot diff', function()
+    it('keeps unchanged surrounding text instead of replacing the entire document', function()
+      assert.are.same({ { p = 6, d = 'old' }, { p = 6, i = 'new' } }, ot.diff('Hello old world', 'Hello new world'))
+      assert.are.same({}, ot.diff('same', 'same'))
+    end)
+
+    it('roundtrips insertions, deletions, shared UTF-8 bytes, and multiline text', function()
+      for _, pair in ipairs({
+        { '', 'text' },
+        { 'text', '' },
+        { 'abc', 'abcd' },
+        { 'abcd', 'abc' },
+        { 'café', 'cafê' },
+        { 'A日本語Z', 'A中国語Z' },
+        { '😀', '😁' },
+        { 'αβ\nlast', 'αchanged\nlast' },
+        { 'a\n', 'a\n\n' },
+      }) do
+        assert.are.equal(pair[2], ot.apply(pair[1], ot.diff(pair[1], pair[2])))
+      end
+    end)
+  end)
   describe('utf8_len', function()
     it('counts ASCII characters', function() assert.are.equal(5, ot.utf8_len('hello')) end)
 

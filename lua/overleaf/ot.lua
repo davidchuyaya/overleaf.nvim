@@ -76,6 +76,39 @@ function M.char_to_byte(s, char_offset)
   return i - 1
 end
 
+--- Describe a snapshot edit, retaining its common prefix and suffix.
+--- Keep UTF-8 boundaries intact even when two characters share bytes.
+---@param before string
+---@param after string
+---@return table[]
+function M.diff(before, after)
+  if before == after then return {} end
+  local prefix = 0
+  while prefix < math.min(#before, #after) and before:byte(prefix + 1) == after:byte(prefix + 1) do
+    prefix = prefix + 1
+  end
+  while prefix > 0 and before:byte(prefix + 1) and before:byte(prefix + 1) >= 0x80 and before:byte(prefix + 1) < 0xC0 do
+    prefix = prefix - 1
+  end
+  local suffix = 0
+  while
+    suffix < math.min(#before - prefix, #after - prefix)
+    and before:byte(#before - suffix) == after:byte(#after - suffix)
+  do
+    suffix = suffix + 1
+  end
+  while suffix > 0 and before:byte(#before - suffix + 1) >= 0x80 and before:byte(#before - suffix + 1) < 0xC0 do
+    suffix = suffix - 1
+  end
+  local position = M.byte_to_char(before, prefix)
+  local deleted = before:sub(prefix + 1, #before - suffix)
+  local inserted = after:sub(prefix + 1, #after - suffix)
+  local ops = {}
+  if #deleted > 0 then ops[#ops + 1] = { p = position, d = deleted } end
+  if #inserted > 0 then ops[#ops + 1] = { p = position, i = inserted } end
+  return ops
+end
+
 --- Apply a list of operations to a content string
 --- Positions in ops are 0-based character offsets.
 ---@param content string

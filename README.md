@@ -293,6 +293,9 @@ When connected to a project, all text documents are synced to `~/.overleaf/<proj
 - **External edits**: file watchers detect changes and sync them to Overleaf via OT
   - For open documents: buffer is updated, triggering the normal OT pipeline
   - For closed documents: changes are sent directly via the bridge
+  - Whole-file replacements from agents are supported, including multiline edits.
+    Mirror writes import unseen disk changes before overwriting a file, and
+    buffer consistency checks queue missed edits rather than reload over them.
 - **On exit**: pending edits are flushed to Overleaf, mirrored to disk, and acknowledged before Overleaf buffers are removed from the editor session
 
 ### Commands

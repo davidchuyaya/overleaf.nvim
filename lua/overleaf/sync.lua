@@ -8,8 +8,8 @@ local M = {}
 M._sync_dir = nil
 M._watchers = {} -- path -> {handle, doc_id}
 M._write_timers = {} -- doc_id -> timer
-M._writing = {} -- path -> write token (suppress watcher during our writes)
 M._self_writes = {} -- path -> {content, token}, catches delayed filesystem events
+M._disk_content = {} -- last observed contents, protects edits awaiting watcher delivery
 
 --- Start sync for a project. Creates the sync directory.
 ---@param project_name string
@@ -44,8 +44,8 @@ function M.stop()
     vim.fn.timer_stop(timer)
   end
   M._write_timers = {}
-  M._writing = {}
   M._self_writes = {}
+  M._disk_content = {}
 
   M._sync_dir = nil
 end
@@ -86,8 +86,8 @@ local function stop_path_watchers(path)
         M._write_timers[watcher.doc_id] = nil
       end
       M._watchers[watched_path] = nil
-      M._writing[watched_path] = nil
       M._self_writes[watched_path] = nil
+      M._disk_content[watched_path] = nil
     end
   end
 end
@@ -142,32 +142,41 @@ function M.write_doc(doc)
 
   local path = M._sync_dir .. '/' .. doc.path
 
+  -- An agent may have written since our last read, before its watcher event
+  -- arrives. Import that edit rather than overwriting it with a mirror flush.
+  local known = M._disk_content[path]
+  if known ~= nil then
+    local existing = io.open(path, 'r')
+    if existing then
+      local disk = existing:read('*a')
+      existing:close()
+      if disk ~= known then
+        M._on_file_changed(path, doc)
+        return
+      end
+    end
+  end
+
   -- Ensure parent directory exists
   local dir = vim.fn.fnamemodify(path, ':h')
   vim.fn.mkdir(dir, 'p')
 
-  -- Mark this generation before writing so immediate watcher events are cheap
-  -- to suppress. The content marker below also catches events delivered after
-  -- the short writing window has elapsed.
+  -- Identify our own events by content, not a timed window that could suppress
+  -- another writer's edits too.
   local token = {}
   local content = doc.content
-  M._writing[path] = token
 
   local f = io.open(path, 'w')
   if f then
     f:write(content)
     f:close()
+    M._disk_content[path] = content
     M._self_writes[path] = { content = content, token = token }
     vim.defer_fn(function()
       local own = M._self_writes[path]
       if own and own.token == token then M._self_writes[path] = nil end
     end, 5000)
   end
-
-  -- Clear writing flag after watcher event has passed
-  vim.defer_fn(function()
-    if M._writing[path] == token then M._writing[path] = nil end
-  end, 300)
 end
 
 --- Schedule a debounced write to disk (call after content changes)
@@ -208,7 +217,8 @@ function M.watch(doc)
   handle:start(path, {}, function(err, _, _)
     if err then return end
     if M._watchers[path] ~= watcher then return end
-    if M._writing[path] then return end
+    -- Do not suppress every edit during a timed writing window: an agent
+    -- can write then too. _on_file_changed compares actual contents instead.
 
     vim.schedule(function()
       if M._watchers[path] == watcher then M._on_file_changed(path, doc) end
@@ -249,6 +259,16 @@ function M._on_file_changed(path, doc)
     if new_content == own.content then return end
     M._self_writes[path] = nil
   end
+  -- Repeated/delayed notifications for an already observed disk snapshot
+  -- must not roll back newer buffer edits, even after the own-write marker
+  -- expires.
+  if new_content == M._disk_content[path] then return end
+
+  if (doc._remote_apply_pending or 0) > 0 then
+    vim.schedule(function() M._on_file_changed(path, doc) end)
+    return
+  end
+  M._disk_content[path] = new_content
 
   -- No change
   if new_content == doc.content then return end

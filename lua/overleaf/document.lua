@@ -92,7 +92,8 @@ function Document:flush()
 
   -- Pre-flight check: verify buffer and doc.content are in sync
   if not self:check_content() then
-    return -- check_content triggers rejoin on mismatch
+    self:_schedule_flush() -- a remote buffer update is still scheduled
+    return
   end
 
   self.inflight_op = self.pending_ops
@@ -221,29 +222,27 @@ function Document:rejoin(attempt)
   end, delay)
 end
 
---- Verify that the buffer content matches doc.content.
---- If they diverge (e.g. due to undo-clear side effects or missed events),
---- rejoin to resync from the server.
----@return boolean true if content matches
+--- Import any buffer changes missed by incremental callbacks. The buffer is
+--- authoritative for local edits: reloading a server snapshot here loses them.
+---@return boolean true if the buffer and model are ready to flush
 function Document:check_content()
   if not self.joined or self._rejoining then return true end
   if not self.bufnr or not vim.api.nvim_buf_is_valid(self.bufnr) then return true end
   if not vim.api.nvim_buf_is_loaded(self.bufnr) then return true end
   if self.applying_remote then return true end
+  -- The model is updated before the scheduled buffer application. This
+  -- temporary difference is not an external/local edit to send upstream.
+  if (self._remote_apply_pending or 0) > 0 then return false end
 
   local lines = vim.api.nvim_buf_get_lines(self.bufnr, 0, -1, false)
   local buf_content = table.concat(lines, '\n')
 
   if buf_content ~= self.content then
-    config.log(
-      'warn',
-      'Content divergence detected in %s (buf=%d, doc=%d bytes) — rejoining',
-      self.path,
-      #buf_content,
-      #self.content
-    )
-    self:rejoin()
-    return false
+    local ops = ot.diff(self.content, buf_content)
+    self.content = buf_content
+    self:submit_op(ops)
+    require('overleaf.sync').schedule_write(self)
+    config.log('debug', 'Imported missed buffer changes in %s', self.path)
   end
   return true
 end

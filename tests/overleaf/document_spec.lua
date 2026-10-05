@@ -35,7 +35,7 @@ describe('document', function()
       vim.api.nvim_buf_delete(bufnr, { force = true })
     end)
 
-    it('returns false when buffer diverges from doc.content', function()
+    it('imports missed buffer edits instead of rejoining over them', function()
       local doc = Document.new('test_doc', '/main.tex')
       doc.joined = true
       doc.content = 'Hello World'
@@ -45,7 +45,11 @@ describe('document', function()
       doc.bufnr = bufnr
 
       local result = doc:check_content()
-      assert.is_false(result)
+      assert.is_true(result)
+      assert.are.equal('Hello World MODIFIED', doc.content)
+      assert.are.same({ { p = 11, i = ' MODIFIED' } }, doc.pending_ops)
+      assert.is_nil(doc._rejoining)
+      vim.fn.timer_stop(doc._flush_timer)
 
       vim.api.nvim_buf_delete(bufnr, { force = true })
     end)
@@ -122,7 +126,9 @@ describe('document', function()
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'Line 1', 'Line 2 CHANGED', 'Line 3' })
       doc.bufnr = bufnr
 
-      assert.is_false(doc:check_content())
+      assert.is_true(doc:check_content())
+      assert.are.equal('Line 1\nLine 2 CHANGED\nLine 3', doc.content)
+      vim.fn.timer_stop(doc._flush_timer)
 
       vim.api.nvim_buf_delete(bufnr, { force = true })
     end)
@@ -136,7 +142,9 @@ describe('document', function()
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { '日本語テスト' })
       doc.bufnr = bufnr
 
-      assert.is_false(doc:check_content())
+      assert.is_true(doc:check_content())
+      assert.are.equal('日本語テスト', doc.content)
+      vim.fn.timer_stop(doc._flush_timer)
 
       vim.api.nvim_buf_delete(bufnr, { force = true })
     end)
