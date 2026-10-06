@@ -236,8 +236,10 @@ require('overleaf').setup({
 With `pdf_viewer = 'sioyek'`, the plugin opens the PDF on the first successful
 compile. Further compiles only replace the file atomically; Sioyek's automatic
 reload handles the update without a forced cache-clearing reload or repeated
-open commands. Switching to a different PDF opens that file. On macOS, install
-the app at `/Applications/sioyek.app`; elsewhere, `sioyek` must be on `PATH`.
+open commands while the app is running. If you quit Sioyek, the next successful
+compile reopens it automatically. Switching to a different PDF opens that file.
+On macOS, install the app at `/Applications/sioyek.app`; elsewhere, `sioyek`
+must be on `PATH`.
 Automatic reload still depends on Sioyek detecting the file change.
 
 Use `:Overleaf pdf` to reopen the last downloaded PDF if you closed the viewer,

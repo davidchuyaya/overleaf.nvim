@@ -68,6 +68,30 @@ function M._viewer_command(file_path, reload)
   return { 'xdg-open', file_path }
 end
 
+--- Check the app, not just its last launcher: --reuse-window can forward to
+--- an existing Sioyek instance and exit successfully while the GUI stays open.
+---@param callback fun(running: boolean|nil) nil means the check failed
+local function sioyek_running(callback)
+  local mac, windows = vim.fn.has('mac') == 1, vim.fn.has('win32') == 1
+  local cmd = mac and { 'osascript', '-e', 'application "/Applications/sioyek.app" is running' }
+    or windows and { 'tasklist', '/FI', 'IMAGENAME eq sioyek.exe', '/NH' }
+    or { 'pgrep', '-x', 'sioyek' }
+  local ok = pcall(vim.system, cmd, { text = true, timeout = 1500 }, function(result)
+    local running
+    if mac and result.code == 0 then
+      local answer = vim.trim(result.stdout or '')
+      if answer == 'true' or answer == 'false' then running = answer == 'true' end
+    elseif windows and result.code == 0 then
+      running = (result.stdout or ''):lower():find('sioyek.exe', 1, true) ~= nil
+    elseif not mac and not windows and (result.code == 0 or result.code == 1) then
+      running = result.code == 0
+    end
+    vim.schedule(function() callback(running) end)
+  end)
+  -- Fail open: an unavailable process check must not prevent reopening a PDF.
+  if not ok then vim.schedule(function() callback(nil) end) end
+end
+
 --- Show a completed PDF; Sioyek handles later file replacements itself.
 ---@param file_path string
 ---@param opts? table {automatic?, reload?}
@@ -75,9 +99,22 @@ function M._show_pdf(file_path, opts)
   opts = opts or {}
   local viewer = config.get().pdf_viewer
   local sioyek = type(viewer) == 'string' and viewer:lower() == 'sioyek'
-  if opts.automatic and sioyek and M._pdf_state.sioyek_path == file_path then return end
+  if opts.automatic and sioyek and M._pdf_state.sioyek_path == file_path then
+    local state, launch = M._pdf_state, M._pdf_state.launch
+    if state.probe then return end
+    local probe = {}
+    state.probe = probe
+    sioyek_running(function(running)
+      -- A newer PDF/manual open supersedes this asynchronous check.
+      if M._pdf_state ~= state or state.launch ~= launch or state.probe ~= probe then return end
+      state.probe = nil
+      if running ~= true then M._show_pdf(file_path) end
+    end)
+    return
+  end
 
   local launch = {}
+  M._pdf_state.probe = nil
   local ok, job = pcall(vim.fn.jobstart, M._viewer_command(file_path, opts.reload), {
     detach = true,
     on_exit = function(_, code)

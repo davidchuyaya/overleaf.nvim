@@ -3,6 +3,7 @@ describe('PDF viewer commands', function()
   local config = require('overleaf.config')
   local bridge = require('overleaf.bridge')
   local saved_config, saved_has, saved_request, saved_jobstart, saved_pdf_state, saved_readable
+  local saved_system
 
   local function download_pdf(path)
     bridge.request = function(method, _, callback)
@@ -22,6 +23,11 @@ describe('PDF viewer commands', function()
     saved_jobstart = vim.fn.jobstart
     saved_pdf_state = overleaf._pdf_state
     saved_readable = vim.fn.filereadable
+    saved_system = vim.system
+    -- Default to a living viewer; tests never query or launch a real GUI app.
+    vim.system = function(command, _, callback)
+      callback({ code = 0, stdout = command[1] == 'tasklist' and 'sioyek.exe 123 Console' or 'true\n' })
+    end
     overleaf._pdf_state = {}
   end)
 
@@ -32,6 +38,7 @@ describe('PDF viewer commands', function()
     vim.fn.jobstart = saved_jobstart
     overleaf._pdf_state = saved_pdf_state
     vim.fn.filereadable = saved_readable
+    vim.system = saved_system
   end)
 
   it('launches the macOS Sioyek executable without clearing its render cache', function()
@@ -92,7 +99,7 @@ describe('PDF viewer commands', function()
     )
   end)
 
-  it('downloads every compile but only opens the same PDF once', function()
+  it('downloads every compile but only opens the same PDF once while Sioyek is running', function()
     config.setup({ pdf_viewer = 'sioyek' })
     local commands = {}
     vim.fn.jobstart = function(command)
@@ -105,6 +112,131 @@ describe('PDF viewer commands', function()
     assert.are.equal(1, #commands)
     assert.are.same(overleaf._viewer_command('/tmp/project.pdf'), commands[1])
     assert.are.equal('/tmp/project.pdf', overleaf._pdf_state.last_path)
+  end)
+
+  it('reopens on the next compile after a normal Sioyek quit', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    vim.fn.has = function(feature) return feature == 'mac' and 1 or saved_has(feature) end
+    local commands, exit = {}, nil
+    vim.fn.jobstart = function(command, opts)
+      table.insert(commands, command)
+      exit = opts.on_exit
+      return #commands
+    end
+    download_pdf('/tmp/project.pdf')
+    exit(1, 0)
+    vim.system = function(command, _, callback)
+      assert.are.same({ 'osascript', '-e', 'application "/Applications/sioyek.app" is running' }, command)
+      callback({ code = 0, stdout = 'false\n' })
+    end
+    download_pdf('/tmp/project.pdf')
+    assert.is_true(vim.wait(1000, function() return #commands == 2 end))
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf'), commands[2])
+  end)
+
+  it('does not reopen when a reuse-window launcher exits normally but the GUI is still running', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local commands, exit = {}, nil
+    vim.fn.jobstart = function(command, opts)
+      table.insert(commands, command)
+      exit = opts.on_exit
+      return #commands
+    end
+    download_pdf('/tmp/project.pdf')
+    exit(1, 0)
+    download_pdf('/tmp/project.pdf')
+    vim.wait(20, function() return false end)
+    assert.are.equal(1, #commands)
+  end)
+
+  it('reopens when the running-app check fails or cannot start', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local attempts = 0
+    vim.fn.jobstart = function()
+      attempts = attempts + 1
+      return attempts
+    end
+    download_pdf('/tmp/project.pdf')
+    vim.system = function(_, _, callback) callback({ code = 124, stdout = '' }) end
+    download_pdf('/tmp/project.pdf')
+    assert.is_true(vim.wait(1000, function() return attempts == 2 end))
+    vim.system = function() error('probe unavailable') end
+    download_pdf('/tmp/project.pdf')
+    assert.is_true(vim.wait(1000, function() return attempts == 3 end))
+  end)
+
+  it('coalesces pending checks and ignores stale results after switching PDFs', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local commands, probes, complete = {}, 0, nil
+    vim.fn.jobstart = function(command)
+      table.insert(commands, command)
+      return #commands
+    end
+    vim.system = function(_, _, callback)
+      probes = probes + 1
+      complete = callback
+    end
+    download_pdf('/tmp/first.pdf')
+    download_pdf('/tmp/first.pdf')
+    download_pdf('/tmp/first.pdf')
+    assert.are.equal(1, probes)
+    download_pdf('/tmp/second.pdf')
+    complete({ code = 0, stdout = 'false\n' })
+    vim.wait(20, function() return false end)
+    assert.are.equal(2, #commands)
+    assert.are.equal('/tmp/second.pdf', overleaf._pdf_state.sioyek_path)
+  end)
+
+  it('uses pgrep on Unix and distinguishes absent apps from probe errors', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    vim.fn.has = function(feature)
+      if feature == 'mac' or feature == 'win32' then return 0 end
+      return saved_has(feature)
+    end
+    local commands, code = {}, 0
+    vim.fn.jobstart = function(command)
+      table.insert(commands, command)
+      return #commands
+    end
+    vim.system = function(command, _, callback)
+      assert.are.same({ 'pgrep', '-x', 'sioyek' }, command)
+      callback({ code = code })
+    end
+    download_pdf('/tmp/project.pdf')
+    download_pdf('/tmp/project.pdf')
+    vim.wait(20, function() return false end)
+    assert.are.equal(1, #commands)
+    code = 1
+    download_pdf('/tmp/project.pdf')
+    assert.is_true(vim.wait(1000, function() return #commands == 2 end))
+    code = 3
+    download_pdf('/tmp/project.pdf')
+    assert.is_true(vim.wait(1000, function() return #commands == 3 end))
+  end)
+
+  it('checks sioyek.exe on Windows', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    vim.fn.has = function(feature)
+      if feature == 'mac' then return 0 end
+      if feature == 'win32' then return 1 end
+      return saved_has(feature)
+    end
+    local commands, output = {}, 'sioyek.exe 123 Console'
+    vim.fn.jobstart = function(command)
+      table.insert(commands, command)
+      return #commands
+    end
+    vim.system = function(command, _, callback)
+      assert.are.same({ 'tasklist', '/FI', 'IMAGENAME eq sioyek.exe', '/NH' }, command)
+      callback({ code = 0, stdout = output })
+    end
+    download_pdf('/tmp/project.pdf')
+    download_pdf('/tmp/project.pdf')
+    vim.wait(20, function() return false end)
+    assert.are.equal(1, #commands)
+    output = 'INFO: No tasks are running which match the specified criteria.'
+    download_pdf('/tmp/project.pdf')
+    assert.is_true(vim.wait(1000, function() return #commands == 2 end))
   end)
 
   it('opens another PDF and reopens the first when switching back', function()
