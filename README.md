@@ -228,6 +228,9 @@ require('overleaf').setup({
   -- When set, all documents are mirrored to disk and external changes are synced back.
   sync_dir = '~/.overleaf',
 
+  -- Reopen remembered document tabs after connecting to the same project.
+  restore_session = true,
+
   -- Set to false to disable default keymaps
   keys = true,
 })
@@ -304,6 +307,22 @@ When connected to a project, all text documents are synced to `~/.overleaf/<proj
     Mirror writes import unseen disk changes before overwriting a file, and
     buffer consistency checks queue missed edits rather than reload over them.
 - **On exit**: pending edits are flushed to Overleaf, mirrored to disk, and acknowledged before Overleaf buffers are removed from the editor session
+
+### Remembering document tabs
+
+By default, Overleaf remembers the open document tabs, their order, active file,
+and cursor positions when you exit or disconnect. Live buffers are still removed
+before Neovim saves its session, so restarting does not reopen empty Overleaf
+tabs. Connecting to the same project reopens those files through live joins,
+using fresh server content. Different projects and self-hosted instances have
+separate histories; deleted documents are skipped and renamed documents are
+resolved by ID where possible.
+
+Only document tabs are restored, not Neovim tabpage/split layouts or terminal
+windows. Metadata (no document text or credentials) is stored under
+`stdpath('data')/overleaf.nvim/sessions`. Set `restore_session = false` to disable
+this behavior. The first exit or disconnect after installing this version
+creates the remembered tab list.
 
 ### Commands
 

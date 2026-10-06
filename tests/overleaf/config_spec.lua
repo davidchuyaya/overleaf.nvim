@@ -28,6 +28,7 @@ describe('config', function()
     )
 
     it('asks Mason to install TexLab by default', function() assert.is_true(config.get().ensure_texlab) end)
+    it('restores remembered document tabs by default', function() assert.is_true(config.get().restore_session) end)
 
     it('has log_level defaulting to info', function() assert.are.equal('info', config.get().log_level) end)
   end)

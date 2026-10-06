@@ -9,6 +9,9 @@ describe('overleaf shutdown', function()
     local overleaf = require('overleaf')
     local sync = require('overleaf.sync')
     local sync_root = vim.fn.tempname()
+    local session = require('overleaf.session')
+    local original_storage = session._storage_dir
+    session._storage_dir = sync_root .. '/sessions'
     overleaf.setup({ keys = false, sync_dir = sync_root })
     sync.start('project')
 
@@ -42,6 +45,7 @@ describe('overleaf shutdown', function()
     }
 
     overleaf._state.connected = true
+    overleaf._state.project_id = 'project-shutdown'
     overleaf._state.documents = { [doc.doc_id] = doc }
 
     assert.is_true(overleaf.flush_all(500))
@@ -49,6 +53,8 @@ describe('overleaf shutdown', function()
     assert.is_false(vim.bo[bufnr].modified)
 
     overleaf._prepare_exit()
+    local remembered = session.load(overleaf._state)
+    assert.are.equal('main.tex', remembered.files[1].path)
     assert.is_true(overleaf._exit_cleanup_pending)
     assert.is_true(vim.api.nvim_buf_is_valid(bufnr))
     assert.is_function(hooks.pre_save)
@@ -56,11 +62,14 @@ describe('overleaf shutdown', function()
     hooks.pre_save()
     assert.is_false(overleaf._exit_cleanup_pending)
     assert.is_false(vim.api.nvim_buf_is_valid(bufnr))
+    assert.are.equal('main.tex', session.load(overleaf._state).files[1].path)
 
     overleaf._state.connected = false
+    overleaf._state.project_id = nil
     overleaf._state.documents = {}
     sync.stop()
     vim.fn.delete(sync_root, 'rf')
+    session._storage_dir = original_storage
     package.loaded.resession = nil
   end)
 end)

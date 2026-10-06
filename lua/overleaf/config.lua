@@ -12,6 +12,7 @@ M._config = {
   explorer_key = '<leader>e', -- Neo-tree shortcut, scoped to Overleaf while connected
   ensure_texlab = true, -- Install TexLab through Mason when Mason is available
   sync_dir = nil, -- Local file sync directory (nil = disabled; enables external tool integration)
+  restore_session = true, -- Reopen remembered document tabs after connecting to the same project
   log_level = 'info', -- 'debug', 'info', 'warn', 'error'
 }
 

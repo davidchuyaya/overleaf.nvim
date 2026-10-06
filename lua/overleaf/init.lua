@@ -352,11 +352,13 @@ function M._connect_project(cookie, project_id, project_name)
 
     -- Start file sync (if sync_dir configured)
     sync.start(project_name)
-    sync.sync_all(
-      M._state,
-      project._project_tree,
-      function() require('overleaf.live_buffers').attach_open_buffers() end
-    )
+    sync.sync_all(M._state, project._project_tree, function()
+      vim.schedule(function()
+        if not M._state.connected or M._state.project_id ~= project_id then return end
+        require('overleaf.live_buffers').attach_open_buffers()
+        require('overleaf.session').restore(M)
+      end)
+    end)
     require('overleaf.cursors').publish_position(true)
 
     -- Show tree immediately
@@ -700,6 +702,9 @@ function M._rejoin_documents()
 end
 
 function M.open_document(doc_id_or_path, doc_path, on_open, opts)
+  local function complete(doc, err)
+    if opts and opts.on_complete then opts.on_complete(doc, err) end
+  end
   local doc_id = doc_id_or_path
   local path = doc_path
 
@@ -711,6 +716,7 @@ function M.open_document(doc_id_or_path, doc_path, on_open, opts)
       path = info.path
     else
       config.log('error', 'Document not found: %s', doc_id_or_path)
+      complete(nil, { message = 'Document not found' })
       return
     end
   end
@@ -718,7 +724,13 @@ function M.open_document(doc_id_or_path, doc_path, on_open, opts)
   -- Check if already open
   if M._state.documents[doc_id] then
     local existing = M._state.documents[doc_id]
-    if existing._opening then return end
+    if existing._opening then
+      if opts and opts.on_complete then
+        existing._open_waiters = existing._open_waiters or {}
+        table.insert(existing._open_waiters, opts.on_complete)
+      end
+      return
+    end
     if existing._external_joining then
       -- Share the mirror's pending join instead of replacing its Document and
       -- losing the applied ACK for an external edit already being submitted.
@@ -733,6 +745,7 @@ function M.open_document(doc_id_or_path, doc_path, on_open, opts)
     then
       if not opts or opts.display ~= false then vim.api.nvim_set_current_buf(existing.bufnr) end
       if on_open then on_open(existing) end
+      complete(existing)
       return
     end
     if existing.joined and existing.content then
@@ -742,33 +755,52 @@ function M.open_document(doc_id_or_path, doc_path, on_open, opts)
       local reattach_opts = vim.tbl_extend('force', opts or {}, { reattach = true })
       if buffer.create(existing, vim.split(existing.content, '\n', { plain = true }), reattach_opts) then
         if on_open then on_open(existing) end
+        complete(existing)
         sync.write_doc(existing)
         sync.watch(existing)
         require('overleaf.cursors').publish_position(true)
         require('overleaf.cursors').render_document(doc_id)
+      else
+        complete(nil, { message = 'Local buffer has unsaved edits' })
       end
       return
     end
   end
 
   local doc = Document.new(doc_id, path)
+  local documents = M._state.documents
   doc._opening = true
   M._state.documents[doc_id] = doc
 
   doc:join(function(err, lines, ranges)
     doc._opening = false
+    local function finish(joined, failure)
+      complete(joined, failure)
+      local waiters = doc._open_waiters or {}
+      doc._open_waiters = nil
+      for _, callback in ipairs(waiters) do
+        callback(joined, failure)
+      end
+    end
+    if M._state.documents ~= documents then
+      finish(nil, { message = 'Project connection changed' })
+      return
+    end
     if err then
       M._state.documents[doc_id] = nil
+      finish(nil, err)
       return
     end
 
     if not buffer.create(doc, lines, opts) then
       doc:leave()
       M._state.documents[doc_id] = nil
+      finish(nil, { message = 'Local buffer has unsaved edits' })
       return
     end
 
     if on_open then on_open(doc) end
+    finish(doc)
     require('overleaf.cursors').publish_position(true)
     require('overleaf.cursors').render_document(doc_id)
 
@@ -1701,6 +1733,7 @@ function M._finish_exit_cleanup()
 end
 
 function M._prepare_exit()
+  require('overleaf.session').cancel()
   M._exit_cleanup_pending = false
   if not M.flush_all(5000) then
     config.log('error', 'Could not save every pending edit to Overleaf before exit; keeping local mirror buffers')
@@ -1708,10 +1741,13 @@ function M._prepare_exit()
   end
 
   M._exit_cleanup_pending = true
+  require('overleaf.session').save(M._state)
   if not M._resession_hook_registered then M._finish_exit_cleanup() end
 end
 
 function M.disconnect()
+  require('overleaf.session').cancel()
+  require('overleaf.session').save(M._state)
   -- Stop auto-reconnect
   M._reconnect.attempt = 0
   M._reconnect.in_progress = false
