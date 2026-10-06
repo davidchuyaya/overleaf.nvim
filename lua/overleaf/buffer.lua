@@ -39,6 +39,9 @@ function M.create(doc, lines, opts)
   -- Buffer options first
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].swapfile = false
+  -- Snacks otherwise excludes acwrite buffers and can fall back to a
+  -- Sidekick terminal or explorer split when choosing where to open files.
+  vim.b[bufnr].snacks_main = true
 
   -- Set content
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)

@@ -171,6 +171,11 @@ save/sync handling. No Sidekick source or AstroNvim configuration changes are
 needed. Other special buffers and `overleaf://` documents without a readable
 local mirror retain Sidekick's normal behavior.
 
+Live Overleaf buffers are also marked as editor targets for Snacks pickers.
+AstroNvim's file searches open results in the document window rather than
+falling back to a Sidekick terminal or explorer split. Existing search keymaps
+and Overleaf save handling remain unchanged.
+
 ### Tree Keymaps
 
 | Key | Description |
