@@ -12,7 +12,9 @@ describe('PDF viewer commands', function()
     end
     overleaf._open_pdf({ { path = 'output.pdf', url = 'https://example.com/output.pdf' } })
     local done = false
-    vim.schedule(function() done = true end)
+    vim.schedule(function()
+      vim.schedule(function() done = true end)
+    end)
     assert.is_true(vim.wait(1000, function() return done end))
   end
 
@@ -82,7 +84,7 @@ describe('PDF viewer commands', function()
     assert.are.equal(0, #commands)
     complete(nil, { path = '/tmp/project.pdf' })
     assert.is_true(vim.wait(1000, function() return #commands == 1 end))
-    assert.are.same(overleaf._viewer_command('/tmp/project.pdf'), commands[1])
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[1])
 
     overleaf._open_pdf({ { path = 'output.pdf', url = 'https://example.com/output.pdf' } })
     complete({ message = 'download failed' })
@@ -110,7 +112,7 @@ describe('PDF viewer commands', function()
     download_pdf('/tmp/project.pdf')
     download_pdf('/tmp/project.pdf')
     assert.are.equal(1, #commands)
-    assert.are.same(overleaf._viewer_command('/tmp/project.pdf'), commands[1])
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[1])
     assert.are.equal('/tmp/project.pdf', overleaf._pdf_state.last_path)
   end)
 
@@ -172,11 +174,11 @@ describe('PDF viewer commands', function()
       table.insert(commands, command)
       return #commands
     end
+    download_pdf('/tmp/first.pdf')
     vim.system = function(_, _, callback)
       probes = probes + 1
       complete = callback
     end
-    download_pdf('/tmp/first.pdf')
     download_pdf('/tmp/first.pdf')
     download_pdf('/tmp/first.pdf')
     assert.are.equal(1, probes)
@@ -267,6 +269,107 @@ describe('PDF viewer commands', function()
     download_pdf('/tmp/project.pdf')
     download_pdf('/tmp/project.pdf')
     assert.are.equal(4, #commands)
+  end)
+
+  it('refreshes a PDF left open from another Neovim once, then relies on automatic reload', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local commands = {}
+    vim.fn.jobstart = function(command)
+      commands[#commands + 1] = command
+      return #commands
+    end
+    download_pdf('/tmp/project.pdf')
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[1])
+    download_pdf('/tmp/project.pdf')
+    assert.are.equal(1, #commands)
+  end)
+
+  it('refreshes once after reconnecting to the same project without quitting Sioyek', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local commands = {}
+    vim.fn.jobstart = function(command)
+      commands[#commands + 1] = command
+      return #commands
+    end
+    download_pdf('/tmp/project.pdf')
+    overleaf._reset_pdf_connection()
+    download_pdf('/tmp/project.pdf')
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[2])
+    download_pdf('/tmp/project.pdf')
+    assert.are.equal(2, #commands)
+  end)
+
+  it('does not force a reload when starting a fresh Sioyek instance', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    vim.system = function(_, _, callback) callback({ code = 0, stdout = 'false\n' }) end
+    local command
+    vim.fn.jobstart = function(cmd)
+      command = cmd
+      return 1
+    end
+    download_pdf('/tmp/project.pdf')
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf'), command)
+  end)
+
+  it('refreshes once even if running-app detection is unavailable', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    vim.system = function(_, _, callback) callback({ code = 124, stdout = '' }) end
+    local command
+    vim.fn.jobstart = function(cmd)
+      command = cmd
+      return 1
+    end
+    download_pdf('/tmp/project.pdf')
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), command)
+  end)
+
+  it('still refreshes the first compile after manually reopening an older connection PDF', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local commands = {}
+    vim.fn.jobstart = function(command)
+      commands[#commands + 1] = command
+      return #commands
+    end
+    download_pdf('/tmp/project.pdf')
+    overleaf._reset_pdf_connection()
+    overleaf._show_pdf('/tmp/project.pdf')
+    download_pdf('/tmp/project.pdf')
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[3])
+    download_pdf('/tmp/project.pdf')
+    assert.are.equal(3, #commands)
+  end)
+
+  it('ignores a PDF download from a previous connection', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local reply
+    bridge.request = function(_, _, callback) reply = callback end
+    vim.fn.jobstart = function() error('Old connection PDF must not launch a viewer') end
+    overleaf._open_pdf({ { path = 'output.pdf', url = 'https://example.test/output.pdf' } })
+    overleaf._reset_pdf_connection()
+    reply(nil, { path = '/tmp/old.pdf' })
+    assert.is_nil(overleaf._pdf_state.last_path)
+  end)
+
+  it('ignores an old running-app probe after reconnecting', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local probes, commands = {}, {}
+    vim.system = function(_, _, callback) probes[#probes + 1] = callback end
+    vim.fn.jobstart = function(cmd)
+      commands[#commands + 1] = cmd
+      return 1
+    end
+    download_pdf('/tmp/project.pdf')
+    overleaf._reset_pdf_connection()
+    download_pdf('/tmp/project.pdf')
+    assert.are.equal(2, #probes)
+    probes[1]({ code = 0, stdout = 'true\n' })
+    local done = false
+    vim.schedule(function() done = true end)
+    assert.is_true(vim.wait(1000, function() return done end))
+    assert.are.equal(0, #commands)
+    probes[2]({ code = 0, stdout = 'true\n' })
+    assert.is_true(vim.wait(1000, function() return #commands == 1 end))
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[1])
   end)
 
   it('allows manually reopening and reloading without another download', function()

@@ -11,6 +11,13 @@ M._exit_cleanup_pending = false
 M._resession_hook_registered = false
 M._pdf_state = { last_path = nil, sioyek_path = nil }
 
+-- Keep the last PDF available for manual viewing, but reestablish the viewer
+-- after a new socket connection (including reconnects in the same Neovim).
+function M._reset_pdf_connection()
+  M._pdf_state.connection = (M._pdf_state.connection or 0) + 1
+  M._pdf_state.probe = nil
+end
+
 local function setup_exit_hooks()
   local group = vim.api.nvim_create_augroup('overleaf_exit', { clear = true })
 
@@ -45,7 +52,7 @@ end
 
 --- Build the command used to open a PDF or other downloaded file.
 ---@param file_path string
----@param reload? boolean explicitly refresh Sioyek as a manual fallback
+---@param reload? boolean explicitly refresh Sioyek
 ---@return string[]
 function M._viewer_command(file_path, reload)
   local viewer = config.get().pdf_viewer
@@ -92,23 +99,36 @@ local function sioyek_running(callback)
   if not ok then vim.schedule(function() callback(nil) end) end
 end
 
---- Show a completed PDF; Sioyek handles later file replacements itself.
+--- Refresh a previous connection's PDF once; Sioyek handles later replacements.
 ---@param file_path string
----@param opts? table {automatic?, reload?}
+---@param opts? table {automatic?, reload?, establish?}
 function M._show_pdf(file_path, opts)
   opts = opts or {}
   local viewer = config.get().pdf_viewer
   local sioyek = type(viewer) == 'string' and viewer:lower() == 'sioyek'
-  if opts.automatic and sioyek and M._pdf_state.sioyek_path == file_path then
+  local connection = M._pdf_state.connection or 0
+  local refresh = M._pdf_state.sioyek_connection ~= connection
+  if opts.automatic and sioyek and (M._pdf_state.sioyek_path == file_path or refresh) then
     local state, launch = M._pdf_state, M._pdf_state.launch
-    if state.probe then return end
-    local probe = {}
+    if state.probe and state.probe.path == file_path then return end
+    local probe = { path = file_path }
     state.probe = probe
     sioyek_running(function(running)
       -- A newer PDF/manual open supersedes this asynchronous check.
-      if M._pdf_state ~= state or state.launch ~= launch or state.probe ~= probe then return end
+      if
+        M._pdf_state ~= state
+        or state.launch ~= launch
+        or state.probe ~= probe
+        or (state.connection or 0) ~= connection
+      then
+        return
+      end
       state.probe = nil
-      if running ~= true then M._show_pdf(file_path) end
+      -- A previous session's cached document may survive a normal reopen. Do
+      -- one explicit reload if the app is alive; don't reload every compile.
+      if refresh or running ~= true then
+        M._show_pdf(file_path, { reload = refresh and running ~= false, establish = true })
+      end
     end)
     return
   end
@@ -133,6 +153,7 @@ function M._show_pdf(file_path, opts)
   end
   if sioyek then
     M._pdf_state.sioyek_path = file_path
+    if opts.automatic or opts.establish then M._pdf_state.sioyek_connection = connection end
     M._pdf_state.launch = launch
   end
 end
@@ -219,26 +240,66 @@ end
 
 function M.jump_to_collaborator() require('overleaf.cursors').jump() end
 
+--- Open the login site without passing cookies or other authentication data.
+function M._open_login()
+  local url = config.get().base_url
+  if type(url) ~= 'string' or not url:match('^https?://') then
+    config.log('warn', 'Cannot open login site: invalid Overleaf base_url')
+    return
+  end
+  local command = vim.fn.has('mac') == 1 and { 'open', '-a', 'Brave Browser', url }
+    or { vim.fn.executable('brave') == 1 and 'brave' or 'brave-browser', url }
+  local ok, job = pcall(vim.fn.jobstart, command, {
+    detach = true,
+    on_exit = function(_, code)
+      if code ~= 0 then
+        vim.schedule(function() config.log('warn', 'Could not open Brave. Open %s manually to sign in.', url) end)
+      end
+    end,
+  })
+  if not ok or job <= 0 then
+    config.log('warn', 'Could not open Brave. Open %s manually to sign in.', url)
+    return
+  end
+  config.log('info', 'Opening Overleaf in Brave. Sign in, then run :Overleaf connect again.')
+end
+
 function M.connect()
   config.log('info', 'Starting bridge...')
+  -- One browser launch per explicit attempt; do not retry or create a login loop.
+  local opened_login = false
+  local function failed()
+    if opened_login then return end
+    opened_login = true
+    M._open_login()
+  end
 
   -- Step 1: Start bridge process
   bridge.start(function(err)
     if err then
       config.log('error', 'Failed to start bridge: %s', err.message)
+      failed()
       return
     end
 
     -- Step 2: Get cookie (from Brave, config, or .env)
-    M._get_cookie(function(cookie)
-      if not cookie then return end
+    M._get_cookie(function(cookie, cookie_err)
+      if not cookie then
+        if not cookie_err or cookie_err.code ~= 'CANCELLED' then failed() end
+        return
+      end
 
       config.log('info', 'Authenticating...')
 
       -- Step 3: Authenticate and get project list
       bridge.request('auth', { cookie = cookie }, function(auth_err, result)
-        if auth_err then
-          config.log('error', 'Authentication failed: %s', auth_err.message)
+        if auth_err or type(result) ~= 'table' or type(result.projects) ~= 'table' then
+          config.log(
+            'error',
+            'Authentication failed: %s',
+            auth_err and auth_err.message or 'Invalid authentication response'
+          )
+          failed()
           return
         end
 
@@ -292,7 +353,7 @@ function M._get_cookie(callback)
           if choice then
             extract_from_profile(choice.dir)
           else
-            M._get_cookie_fallback(callback)
+            callback(nil, { code = 'CANCELLED', message = 'Profile selection cancelled' })
           end
         end)
       end)
@@ -338,6 +399,7 @@ function M._connect_project(cookie, project_id, project_name)
     M._state.project_name = project_name
     M._state.project_data = result.project
     M._state.public_id = result.publicId
+    M._reset_pdf_connection()
     require('overleaf.statusline').reset()
     require('overleaf.cursors').clear_all()
     require('overleaf.cursors').load_collaborators()
@@ -352,17 +414,27 @@ function M._connect_project(cookie, project_id, project_name)
 
     -- Start file sync (if sync_dir configured)
     sync.start(project_name)
-    sync.sync_all(M._state, project._project_tree, function()
-      vim.schedule(function()
-        if not M._state.connected or M._state.project_id ~= project_id then return end
-        require('overleaf.live_buffers').attach_open_buffers()
-        require('overleaf.session').restore(M)
+    -- Reopen remembered tabs before bulk mirroring. Waiting for every document
+    -- (including its leave ACK) delays restoration on larger projects.
+    local state, documents = M._state, M._state.documents
+    local function current()
+      return M._state == state and state.connected and state.project_id == project_id and state.documents == documents
+    end
+    vim.schedule(function()
+      if not current() then return end
+      -- Open the explorer before restoration captures focus, so its initial
+      -- focus change does not look like a user cancelling tab selection.
+      M.toggle_tree(true)
+      require('overleaf.session').restore(M, function()
+        if not current() then return end
+        sync.sync_all(state, project._project_tree, function()
+          vim.schedule(function()
+            if current() then require('overleaf.live_buffers').attach_open_buffers() end
+          end)
+        end)
       end)
     end)
     require('overleaf.cursors').publish_position(true)
-
-    -- Show tree immediately
-    vim.schedule(function() M.toggle_tree(true) end)
   end)
 end
 
@@ -675,6 +747,7 @@ function M._reconnect_to_project(cookie)
     M._state.project_data = result.project
     M._reconnect.attempt = 0
     M._state.public_id = result.publicId
+    M._reset_pdf_connection()
     require('overleaf.cursors').clear_all()
     require('overleaf.cursors').load_collaborators()
     require('overleaf.cursors').publish_position(true)
@@ -1293,6 +1366,8 @@ function M._open_pdf(output_files)
 
   local pdf_url = pdf_file.url
   if not pdf_url:match('^https?://') then pdf_url = config.get().base_url .. pdf_url end
+  local state, connection = M._pdf_state, M._pdf_state.connection or 0
+  local function current() return M._pdf_state == state and (state.connection or 0) == connection end
 
   bridge.request('downloadUrl', {
     cookie = config.get().cookie,
@@ -1300,12 +1375,15 @@ function M._open_pdf(output_files)
     fileName = (M._state.project_name or 'output') .. '.pdf',
     outputDir = config.get().pdf_dir,
   }, function(err, result)
+    if not current() then return end
     if err then
       config.log('error', 'PDF download failed: %s', err.message)
       return
     end
     M._pdf_state.last_path = result.path
-    vim.schedule(function() M._show_pdf(result.path, { automatic = true }) end)
+    vim.schedule(function()
+      if current() then M._show_pdf(result.path, { automatic = true }) end
+    end)
   end)
 end
 

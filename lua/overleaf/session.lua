@@ -123,11 +123,17 @@ local function editor_window()
   end
 end
 
-function M.restore(overleaf)
-  if config.get().restore_session == false or not overleaf._state.connected then return end
+function M.restore(overleaf, on_complete)
+  if config.get().restore_session == false or not overleaf._state.connected then
+    if on_complete then on_complete() end
+    return
+  end
   local state = overleaf._state
   local saved = M.load(state)
-  if not saved then return end
+  if not saved then
+    if on_complete then on_complete() end
+    return
+  end
   local documents, project_id = state.documents, state.project_id
   local token = {}
   M._restore_token = token
@@ -143,7 +149,7 @@ function M.restore(overleaf)
   local start_win = vim.api.nvim_get_current_win()
   local start_buf = target and vim.api.nvim_win_get_buf(target)
   local restored, active, seen = {}, nil, {}
-  local function finish()
+  local function display_restored()
     if not valid() then return end
     if vim.api.nvim_tabpage_is_valid(tabpage) and vim.t[tabpage].bufs then
       local order = {}
@@ -167,6 +173,13 @@ function M.restore(overleaf)
     vim.api.nvim_win_set_buf(target, buf)
     vim.api.nvim_set_current_win(target)
     vim.api.nvim_win_set_cursor(target, vim.api.nvim_buf_get_mark(buf, '"'))
+  end
+  local function finish()
+    if not valid() then return end
+    display_restored()
+    -- Mirror initialization must continue even if there are no remembered files
+    -- or the user changed focus while the joins were in progress.
+    if on_complete then on_complete() end
   end
   local index = 0
   local function next_file()

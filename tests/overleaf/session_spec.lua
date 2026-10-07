@@ -5,6 +5,7 @@ local Document = require('overleaf.document')
 local bridge = require('overleaf.bridge')
 local project = require('overleaf.project')
 local config = require('overleaf.config')
+local sync = require('overleaf.sync')
 
 describe('remembering Overleaf document tabs', function()
   local root, original_state, original_config, original_request, original_tree, original_tabs, original_storage
@@ -40,6 +41,7 @@ describe('remembering Overleaf document tabs', function()
 
   after_each(function()
     session.cancel()
+    sync.stop()
     for _, doc in pairs(overleaf._state.documents) do
       if doc.bufnr then buffers[#buffers + 1] = doc.bufnr end
     end
@@ -165,6 +167,79 @@ describe('remembering Overleaf document tabs', function()
     reply(nil, { lines = { 'Other connection' }, version = 2 })
     vim.wait(30, function() return false end)
     assert.are.same({}, overleaf._state.documents)
+  end)
+
+  it('restores saved tabs before a slow unrelated mirror join, including explorer focus changes', function()
+    save_and_close()
+    config.setup({ sync_dir = root .. '/mirror' })
+    overleaf._state.connected = false
+    local original = bridge.request
+    local slow_reply
+    bridge.request = function(method, params, callback)
+      if method == 'connect' then
+        callback(nil, {
+          project = {
+            rootFolder = {
+              docs = {
+                { _id = 'a', name = 'a.txt' },
+                { _id = 'b', name = 'b.txt' },
+                { _id = 'slow', name = 'unrelated.txt' },
+              },
+            },
+          },
+        })
+      elseif method == 'joinDoc' and params.docId == 'slow' then
+        joins[#joins + 1] = params.docId
+        slow_reply = callback
+      else
+        original(method, params, callback)
+      end
+    end
+    overleaf.toggle_tree = function()
+      vim.cmd('vsplit')
+      windows[#windows + 1] = vim.api.nvim_get_current_win()
+      local tree = vim.api.nvim_create_buf(false, true)
+      buffers[#buffers + 1] = tree
+      vim.api.nvim_set_current_buf(tree)
+    end
+    overleaf._connect_project('test-cookie', 'project-a', 'Project A')
+    assert.is_true(vim.wait(1000, function() return slow_reply ~= nil end))
+    local a, b = overleaf._state.documents.a, overleaf._state.documents.b
+    assert.is_true(a.joined)
+    assert.is_true(b.joined)
+    assert.are.equal(b.bufnr, vim.api.nvim_get_current_buf())
+    assert.are.same({ b.bufnr, a.bufnr }, vim.t.bufs)
+    assert.are.same({ 'b', 'a', 'slow' }, joins)
+  end)
+
+  it('completes initialization when restoration is disabled or no history exists', function()
+    local calls = 0
+    session.restore(overleaf, function() calls = calls + 1 end)
+    assert.are.equal(1, calls)
+    config.setup({ restore_session = false })
+    session.restore(overleaf, function() calls = calls + 1 end)
+    assert.are.equal(2, calls)
+  end)
+
+  it('continues mirror initialization if focus changes during restoration', function()
+    save_and_close()
+    local reply
+    local original = bridge.request
+    bridge.request = function(method, params, callback)
+      if method == 'joinDoc' and not reply then
+        reply = function() original(method, params, callback) end
+      else
+        original(method, params, callback)
+      end
+    end
+    local done = false
+    session.restore(overleaf, function() done = true end)
+    local other = vim.api.nvim_create_buf(true, false)
+    buffers[#buffers + 1] = other
+    vim.api.nvim_set_current_buf(other)
+    reply()
+    assert.is_true(vim.wait(1000, function() return done end))
+    assert.are.equal(other, vim.api.nvim_get_current_buf())
   end)
 
   it('keeps projects and Overleaf instances separate', function()

@@ -69,6 +69,10 @@ cd ~/.local/share/nvim/lazy/overleaf.nvim/node && npm install
 
 Just log in to [overleaf.com](https://www.overleaf.com) in Brave. The plugin extracts the session cookie automatically. If you have multiple Brave profiles, you'll be prompted to select one. Chrome is not required. macOS may ask you to allow access to Brave Safe Storage in Keychain; allow it so the plugin can decrypt your session cookie.
 
+If authentication fails (including missing cookies or Keychain access), the plugin opens
+the Overleaf site in Brave. Sign in there, then run `:Overleaf connect` again. Manual
+cookies still work as a fallback; cancelling the profile picker does not open Brave.
+
 ### Option 2: Manual cookie
 
 Create a `.env` file in your working directory:
@@ -237,7 +241,9 @@ require('overleaf').setup({
 ```
 
 With `pdf_viewer = 'sioyek'`, the plugin opens the PDF on the first successful
-compile. Further compiles only replace the file atomically; Sioyek's automatic
+compile. If Sioyek is already running, the first compile after each connection
+explicitly reloads the PDF once, clearing a document cached from an older session.
+Further compiles only replace the file atomically; Sioyek's automatic
 reload handles the update without a forced cache-clearing reload or repeated
 open commands while the app is running. If you quit Sioyek, the next successful
 compile reopens it automatically. Switching to a different PDF opens that file.
@@ -314,7 +320,9 @@ By default, Overleaf remembers the open document tabs, their order, active file,
 and cursor positions when you exit or disconnect. Live buffers are still removed
 before Neovim saves its session, so restarting does not reopen empty Overleaf
 tabs. Connecting to the same project reopens those files through live joins,
-using fresh server content. Different projects and self-hosted instances have
+using fresh server content. Remembered files are restored before the remaining
+project is mirrored to disk, so a slow bulk sync does not hold up your tabs.
+Different projects and self-hosted instances have
 separate histories; deleted documents are skipped and renamed documents are
 resolved by ID where possible.
 
