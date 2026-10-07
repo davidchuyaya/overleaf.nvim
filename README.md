@@ -173,6 +173,12 @@ TexLab suggestions and their details are retained, with no duplicate keys or
 second completion source. Comments and verbatim examples are skipped. Citation
 and ordinary command/environment completion are unchanged.
 
+Reference items are treated as labels rather than callable methods, preventing
+Blink from appending `{}` to figure references. Accepting a reference inserts
+the missing closing `}`, or reuses an existing one; comma-separated references
+are preserved. `:` is also registered as a TexLab completion trigger so the
+menu stays available while typing label prefixes such as `fig:` and `sec:`.
+
 ### Sidekick context
 
 With `sync_dir` enabled, Sidekick's file, line, position, and visual-selection

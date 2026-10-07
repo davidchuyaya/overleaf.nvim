@@ -103,33 +103,50 @@ local function live_buffer(buf)
   return false
 end
 
-function M.items(client, params, buf)
-  if not live_buffer(buf) or not params or not params.position then return {} end
+function M.context(client, params, buf)
+  if not live_buffer(buf) or not params or not params.position then return nil end
   local row = params.position.line
   local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1]
-  if not line then return {} end
+  if not line then return nil end
   local encoding = client.offset_encoding or 'utf-16'
   local ok, byte = pcall(byte_index, line, params.position.character, encoding)
-  if not ok then return {} end
+  if not ok then return nil end
   local prefix = line:sub(1, byte)
-  if without_comments(prefix) ~= prefix then return {} end
+  if without_comments(prefix) ~= prefix then return nil end
   local command, argument = prefix:match('\\([%a]+)%*?%s*{([^{}]*)$')
   local allowed = references[command]
   local extra = client.settings and client.settings.texlab and client.settings.texlab.experimental
   for _, name in ipairs(extra and extra.labelReferenceCommands or {}) do
     if name == command then allowed = true end
   end
-  if not allowed then return {} end
+  if not allowed then return nil end
   -- Replace the entire current comma-separated key, including text after the
   -- cursor. Blink's generic word bounds split labels at ':' and '-'.
   local fragment = argument:match('([^,]*)$')
   local leading = fragment:match('^%s*')
   local start = byte - #fragment + #leading
-  local suffix = line:sub(byte + 1):match('^[^,}%s]*') or ''
+  local suffix = line:sub(byte + 1):match('^[^,{}%s]*') or ''
   local range = {
     start = { line = row, character = character_index(line, start, encoding) },
     ['end'] = { line = row, character = character_index(line, byte + #suffix, encoding) },
   }
+  local remainder = line:sub(byte + #suffix + 1)
+  -- Consume and reinsert an existing closing brace so accepting lands after
+  -- it. Do not close the argument early when more comma-separated keys follow.
+  local closing = remainder:match('^(%s*})')
+  if closing then
+    range['end'].character = character_index(line, byte + #suffix + #closing, encoding)
+  elseif remainder:match('^%s*,') or remainder:match('^%s*{') then
+    closing = ''
+  else
+    closing = '}'
+  end
+  return { range = range, closing = closing }
+end
+
+function M.items(client, params, buf, context)
+  context = context or M.context(client, params, buf)
+  if not context then return {} end
   local result = {}
   for _, key in ipairs(M.scan(vim.api.nvim_buf_get_lines(buf, 0, -1, false))) do
     result[#result + 1] = {
@@ -137,9 +154,25 @@ function M.items(client, params, buf)
       kind = vim.lsp.protocol.CompletionItemKind.Reference,
       detail = 'Label in current Overleaf buffer',
       filterText = key,
-      textEdit = { newText = key, range = vim.deepcopy(range) },
+      textEdit = { newText = key .. context.closing, range = vim.deepcopy(context.range) },
       insertTextFormat = vim.lsp.protocol.InsertTextFormat.PlainText,
     }
+  end
+  return result
+end
+
+function M.normalize(result, context)
+  if not result or not context then return result end
+  for _, item in ipairs(result.items or result) do
+    local key = item.textEdit and item.textEdit.newText or item.insertText or item.label
+    -- Reference completion contains literal keys, not command snippets. Keep
+    -- TexLab's descriptions, captions and ranking, but never treat a figure's
+    -- Method kind as a function that needs another pair of braces.
+    if type(key) == 'string' and key ~= '' and not key:find('[\\{}%s$#]') then
+      item.kind = vim.lsp.protocol.CompletionItemKind.Reference
+      item.insertTextFormat = vim.lsp.protocol.InsertTextFormat.PlainText
+      item.textEdit = { newText = key .. context.closing, range = vim.deepcopy(context.range) }
+    end
   end
   return result
 end
@@ -161,17 +194,28 @@ function M.merge(result, items)
 end
 
 function M.attach(client)
-  if not client or client.name ~= 'texlab' or type(client.request) ~= 'function' or client._overleaf_labels then
-    return
+  if not client or client.name ~= 'texlab' or type(client.request) ~= 'function' then return end
+  -- Blink reads this standard LSP capability when deciding whether to hide on
+  -- punctuation. Configure it again on LspAttach: a new client may not have
+  -- finished initialization when we first install the request wrapper.
+  local provider = client.server_capabilities and client.server_capabilities.completionProvider
+  if type(provider) == 'table' then
+    local characters = provider.triggerCharacters or {}
+    if not vim.tbl_contains(characters, ':') then
+      provider.triggerCharacters = vim.list_extend(vim.deepcopy(characters), { ':' })
+    end
   end
+  if client._overleaf_labels then return end
   client._overleaf_labels = true
   local original = client.request
   local function handler(method, params, callback, buf)
     if method ~= 'textDocument/completion' or type(callback) ~= 'function' then return callback end
-    local items = M.items(client, params, (buf == nil or buf == 0) and vim.api.nvim_get_current_buf() or buf)
-    if #items == 0 then return callback end
+    buf = (buf == nil or buf == 0) and vim.api.nvim_get_current_buf() or buf
+    local context = M.context(client, params, buf)
+    if not context then return callback end
+    local items = M.items(client, params, buf, context)
     return function(err, result, ...)
-      if not err then result = M.merge(result, items) end
+      if not err then result = M.merge(M.normalize(result, context), items) end
       return callback(err, result, ...)
     end
   end

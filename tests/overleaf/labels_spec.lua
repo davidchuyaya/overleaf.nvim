@@ -47,7 +47,7 @@ describe('complete all live Overleaf labels', function()
       assert.equals(2, #result)
       assert.equals(#line - 5, result[1].textEdit.range.start.character)
       assert.equals(#line, result[1].textEdit.range['end'].character)
-      assert.equals('sec:one', result[1].textEdit.newText)
+      assert.equals('sec:one}', result[1].textEdit.newText)
     end
   end)
 
@@ -55,6 +55,7 @@ describe('complete all live Overleaf labels', function()
     local result = items('\\Cref{sec:first, sec:wrong,sec:last}', nil, 21)
     assert.are.same({ line = 0, character = 17 }, result[1].textEdit.range.start)
     assert.are.same({ line = 0, character = 26 }, result[1].textEdit.range['end'])
+    assert.equals('sec:one', result[1].textEdit.newText)
   end)
 
   it('uses UTF-16 positions after non-ASCII text', function()
@@ -154,5 +155,96 @@ describe('complete all live Overleaf labels', function()
       assert.equals(original_error, err)
       assert.is_nil(result)
     end, buf)
+  end)
+
+  local function accept_reference(line, column, key, kind)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { line })
+    local context = labels.context(client, { position = { line = 0, character = column } }, buf)
+    assert.is_not_nil(context)
+    local result = labels.normalize({
+      items = {
+        {
+          label = key,
+          kind = kind,
+          detail = 'TexLab detail',
+          documentation = { kind = 'markdown', value = 'Figure caption' },
+          sortText = '04',
+          textEdit = {
+            newText = key,
+            range = { start = { line = 0, character = 6 }, ['end'] = { line = 0, character = column } },
+          },
+        },
+      },
+    }, context)
+    local item = result.items[1]
+    vim.lsp.util.apply_text_edits({ item.textEdit }, buf, client.offset_encoding)
+    return vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1], item
+  end
+
+  it('accepts figure and section references with one closing brace and no function braces', function()
+    for _, candidate in ipairs({ { 'fig:exhaustive-search', 2 }, { 'sec:exhaustive-search', 9 } }) do
+      local line, item = accept_reference('\\Cref{' .. candidate[1]:sub(1, 5), 11, candidate[1], candidate[2])
+      assert.equals('\\Cref{' .. candidate[1] .. '}', line)
+      assert.equals(vim.lsp.protocol.CompletionItemKind.Reference, item.kind)
+      assert.equals('TexLab detail', item.detail)
+      assert.equals('Figure caption', item.documentation.value)
+      assert.equals('04', item.sortText)
+      assert.equals(vim.lsp.protocol.InsertTextFormat.PlainText, item.insertTextFormat)
+    end
+  end)
+
+  it('reuses an existing closing brace without doubling it or swallowing surrounding text', function()
+    local line, item = accept_reference('See \\Cref{fig:ex} next.', 16, 'fig:exhaustive-search', 2)
+    assert.equals('See \\Cref{fig:exhaustive-search} next.', line)
+    assert.equals('fig:exhaustive-search}', item.textEdit.newText)
+    assert.equals(17, item.textEdit.range['end'].character)
+    line = accept_reference('\\Cref{sec:ex  }.', 12, 'sec:example', 9)
+    assert.equals('\\Cref{sec:example  }.', line)
+  end)
+
+  it('does not close comma-separated references early and closes the last reference', function()
+    local line = accept_reference('\\Cref{fig:ex,sec:other}', 12, 'fig:exhaustive-search', 2)
+    assert.equals('\\Cref{fig:exhaustive-search,sec:other}', line)
+    line = accept_reference('\\Cref{sec:first, fig:ex', 22, 'fig:exhaustive-search', 2)
+    assert.equals('\\Cref{sec:first, fig:exhaustive-search}', line)
+  end)
+
+  it('normalizes a server-only figure even when the current file defines no labels', function()
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '\\Cref{fig:' })
+    client.request = function(_, _, _, callback)
+      callback(nil, { items = { { label = 'fig:elsewhere', kind = 2, insertText = 'fig:elsewhere' } } })
+    end
+    labels.attach(client)
+    client:request('textDocument/completion', { position = { line = 0, character = 10 } }, function(_, result)
+      assert.equals(1, #result.items)
+      assert.equals(vim.lsp.protocol.CompletionItemKind.Reference, result.items[1].kind)
+      assert.equals('fig:elsewhere}', result.items[1].textEdit.newText)
+    end, buf)
+  end)
+
+  it('never rewrites real command snippets as label keys', function()
+    items('\\Cref{')
+    local context = labels.context(client, { position = { line = 0, character = 6 } }, buf)
+    local command = { label = 'command', kind = 2, textEdit = { newText = 'command{$1}$0' }, insertTextFormat = 2 }
+    local result = labels.normalize({ items = { command } }, context)
+    assert.equals(2, result.items[1].kind)
+    assert.equals('command{$1}$0', result.items[1].textEdit.newText)
+  end)
+
+  it('registers colon after initialization, once, without removing existing triggers', function()
+    client.request = function() end
+    labels.attach(client)
+    local wrapper = client.request
+    local original = { '\\', '{', '}' }
+    client.server_capabilities = { completionProvider = { triggerCharacters = original } }
+    labels.attach(client)
+    labels.attach(client)
+    assert.equals(wrapper, client.request)
+    assert.are.same({ '\\', '{', '}', ':' }, client.server_capabilities.completionProvider.triggerCharacters)
+    assert.are.same({ '\\', '{', '}' }, original)
+    client.name = 'other_lsp'
+    client.server_capabilities.completionProvider.triggerCharacters = { '{' }
+    labels.attach(client)
+    assert.are.same({ '{' }, client.server_capabilities.completionProvider.triggerCharacters)
   end)
 end)
