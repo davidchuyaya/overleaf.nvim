@@ -9,7 +9,7 @@ Edit your Overleaf projects directly in Neovim with full real-time collaboration
 - **Real-time collaboration** — edits sync instantly with other Overleaf users via OT
 - **Full Neovim ecosystem** — treesitter, LSP, snippets, copilot, and all your plugins work out of the box
 - **File tree** — browse and manage project files in a sidebar
-- **Auto-authentication** — extracts session cookie from Chrome automatically (macOS)
+- **Auto-authentication** — extracts session cookie from Brave automatically (macOS)
 - **Auto-reconnect** — recovers from disconnects and document restores seamlessly
 - **Compile & PDF preview** — compile LaTeX and open the PDF
 - **Comments & reviews** — view, reply, resolve comment threads
@@ -26,7 +26,7 @@ Edit your Overleaf projects directly in Neovim with full real-time collaboration
 - Neovim >= 0.10
 - Node.js >= 18
 - An [Overleaf](https://www.overleaf.com) account
-- Chrome / Chromium (for automatic cookie extraction) or a session cookie
+- Brave on macOS (for automatic cookie extraction) or a session cookie
 
 ## Installation
 
@@ -65,9 +65,9 @@ cd ~/.local/share/nvim/lazy/overleaf.nvim/node && npm install
 
 ## Authentication
 
-### Option 1: Chrome (automatic)
+### Option 1: Brave (automatic, macOS)
 
-Just log in to [overleaf.com](https://www.overleaf.com) in Chrome. The plugin extracts the session cookie automatically. If you have multiple Chrome profiles, you'll be prompted to select one.
+Just log in to [overleaf.com](https://www.overleaf.com) in Brave. The plugin extracts the session cookie automatically. If you have multiple Brave profiles, you'll be prompted to select one. Chrome is not required. macOS may ask you to allow access to Brave Safe Storage in Keychain; allow it so the plugin can decrypt your session cookie.
 
 ### Option 2: Manual cookie
 

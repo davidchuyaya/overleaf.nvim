@@ -229,7 +229,7 @@ function M.connect()
       return
     end
 
-    -- Step 2: Get cookie (from config, .env, or Chrome)
+    -- Step 2: Get cookie (from Brave, config, or .env)
     M._get_cookie(function(cookie)
       if not cookie then return end
 
@@ -256,11 +256,11 @@ function M.connect()
 end
 
 function M._get_cookie(callback)
-  -- Chrome first, then config/env as fallback
-  config.log('info', 'Checking Chrome profiles...')
-  bridge.request('listChromeProfiles', {}, function(err, result)
+  -- Brave first, then config/env as fallback
+  config.log('info', 'Checking Brave profiles...')
+  bridge.request('listBraveProfiles', {}, function(err, result)
     if err or not result or not result.profiles or #result.profiles == 0 then
-      config.log('debug', 'Chrome profiles not available: %s', err and err.message or 'none found')
+      config.log('debug', 'Brave profiles not available: %s', err and err.message or 'none found')
       M._get_cookie_fallback(callback)
       return
     end
@@ -268,15 +268,15 @@ function M._get_cookie(callback)
     local profiles = result.profiles
 
     local function extract_from_profile(profile_dir)
-      config.log('info', 'Extracting cookie from Chrome (%s)...', profile_dir)
+      config.log('info', 'Extracting cookie from Brave (%s)...', profile_dir)
       bridge.request('getCookie', { profile = profile_dir }, function(cookie_err, cookie_result)
         if not cookie_err and cookie_result and cookie_result.cookie then
-          config.log('info', 'Cookie extracted from Chrome')
+          config.log('info', 'Cookie extracted from Brave')
           config.get().cookie = cookie_result.cookie
           callback(cookie_result.cookie)
           return
         end
-        config.log('debug', 'Chrome extraction failed: %s', cookie_err and cookie_err.message or 'unknown')
+        config.log('debug', 'Brave extraction failed: %s', cookie_err and cookie_err.message or 'unknown')
         M._get_cookie_fallback(callback)
       end)
     end
@@ -286,7 +286,7 @@ function M._get_cookie(callback)
     else
       vim.schedule(function()
         vim.ui.select(profiles, {
-          prompt = 'Select Chrome Profile:',
+          prompt = 'Select Brave Profile:',
           format_item = function(item) return item.name .. ' (' .. item.dir .. ')' end,
         }, function(choice)
           if choice then
@@ -306,7 +306,7 @@ function M._get_cookie_fallback(callback)
     callback(cookie)
     return
   end
-  config.log('error', 'No cookie found. Log in to overleaf.com in Chrome, or set OVERLEAF_COOKIE in .env')
+  config.log('error', 'No cookie found. Log in to Overleaf in Brave, or set OVERLEAF_COOKIE in .env')
   callback(nil)
 end
 

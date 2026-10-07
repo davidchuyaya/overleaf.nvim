@@ -4,7 +4,7 @@
 const readline = require('readline');
 const auth = require('./auth');
 const SocketManager = require('./socket');
-const { getOverleafCookie, listProfiles } = require('./chrome-cookie');
+const { getOverleafCookie, listProfiles } = require('./brave-cookie');
 
 // Redirect console.log to stderr (stdout is the RPC channel)
 const origLog = console.log;
@@ -38,7 +38,7 @@ const handlers = {
     return { status: 'ok' };
   },
 
-  async listChromeProfiles(params) {
+  async listBraveProfiles(params) {
     const profiles = listProfiles();
     return { profiles };
   },
