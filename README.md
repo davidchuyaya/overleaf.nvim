@@ -166,6 +166,13 @@ client instead of starting another one with a different project root. Its
 fallback LSP integration also prevents duplicate TexLab attachments on live
 Overleaf buffers, without changing LSP behavior for other files.
 
+TexLab caps individual completion responses at 50 entries. Overleaf supplements
+reference completion (`\Cref`, `\cref`, `\ref`, `\eqref`, etc.) with all literal
+`\label{...}` keys in the current live buffer, including unsaved edits. Existing
+TexLab suggestions and their details are retained, with no duplicate keys or
+second completion source. Comments and verbatim examples are skipped. Citation
+and ordinary command/environment completion are unchanged.
+
 ### Sidekick context
 
 With `sync_dir` enabled, Sidekick's file, line, position, and visual-selection
@@ -250,6 +257,27 @@ compile reopens it automatically. Switching to a different PDF opens that file.
 On macOS, install the app at `/Applications/sioyek.app`; elsewhere, `sioyek`
 must be on `PATH`.
 Automatic reload still depends on Sioyek detecting the file change.
+
+Sioyek inverse search is enabled by default (`sioyek_inverse_search = true`).
+After compiling, Shift-click a location in the PDF to open the corresponding
+live Overleaf document in an editor pane and jump to its source line. On macOS,
+supported terminal apps are also brought forward. The plugin downloads the
+compile's `output.synctex.gz` beside the PDF and supplies Sioyek's inverse-search
+command automatically; no local TeX installation or VimTeX setup is needed.
+The location reflects the last compile, so recompile after substantial edits.
+Some TeX constructs only provide a line, not an exact column.
+
+For Sioyek 2.x, add this to `prefs_user.config` (on macOS, under
+`~/Library/Application Support/sioyek/`) and restart Sioyek once:
+
+```text
+shift_click_command synctex_under_cursor
+```
+
+Double-click remains Sioyek's word-selection gesture. Clicks on TeX package
+files or PDFs from a disconnected project do not open unrelated local files.
+If the server does not supply SyncTeX output, PDF viewing still works and the
+plugin warns that inverse search is unavailable. Other PDF viewers are unchanged.
 
 Use `:Overleaf pdf` to reopen the last downloaded PDF if you closed the viewer,
 or `:Overleaf pdf reload` to force a refresh if automatic reload misses an

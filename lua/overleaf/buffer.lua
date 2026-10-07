@@ -168,6 +168,7 @@ function M._dedupe_lsp(bufnr, name)
   for i = 2, #clients do
     vim.lsp.buf_detach_client(bufnr, clients[i].id)
   end
+  if name == 'texlab' then require('overleaf.labels').attach(clients[1]) end
   return clients[1]
 end
 
@@ -216,13 +217,14 @@ function M._attach_lsp(bufnr, ft)
       if vim.fn.executable(srv.cmd[1]) ~= 1 then
         config.log('debug', 'LSP %s not found, skipping', srv.name)
       else
-        pcall(vim.lsp.start, {
+        local ok, id = pcall(vim.lsp.start, {
           name = srv.name,
           cmd = srv.cmd,
           root_dir = root_dir,
           settings = srv.settings,
           get_language_id = function(_, filetype) return lang_id_map[filetype] or filetype end,
         }, { bufnr = bufnr })
+        if ok and id and srv.name == 'texlab' then require('overleaf.labels').attach(vim.lsp.get_client_by_id(id)) end
       end
     end
   end

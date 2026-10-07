@@ -20,6 +20,7 @@ describe('PDF viewer commands', function()
 
   before_each(function()
     saved_config = vim.deepcopy(config._config)
+    config.setup({ sioyek_inverse_search = false })
     saved_has = vim.fn.has
     saved_request = bridge.request
     saved_jobstart = vim.fn.jobstart

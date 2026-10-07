@@ -16,6 +16,7 @@ M._pdf_state = { last_path = nil, sioyek_path = nil }
 function M._reset_pdf_connection()
   M._pdf_state.connection = (M._pdf_state.connection or 0) + 1
   M._pdf_state.probe = nil
+  M._pdf_state.inverse = nil
 end
 
 local function setup_exit_hooks()
@@ -65,6 +66,8 @@ function M._viewer_command(file_path, reload)
   if type(viewer) == 'string' and viewer:lower() == 'sioyek' then
     local executable = vim.fn.has('mac') == 1 and '/Applications/sioyek.app/Contents/MacOS/sioyek' or 'sioyek'
     local cmd = { executable, '--reuse-window' }
+    local inverse = require('overleaf.inverse_search').command(file_path)
+    if inverse then vim.list_extend(cmd, { '--inverse-search', inverse }) end
     if reload then vim.list_extend(cmd, { '--execute-command', 'reload' }) end
     table.insert(cmd, file_path)
     return cmd
@@ -1381,8 +1384,10 @@ function M._open_pdf(output_files)
       return
     end
     M._pdf_state.last_path = result.path
-    vim.schedule(function()
-      if current() then M._show_pdf(result.path, { automatic = true }) end
+    require('overleaf.inverse_search').prepare(result.path, output_files, pdf_url, function()
+      vim.schedule(function()
+        if current() then M._show_pdf(result.path, { automatic = true }) end
+      end)
     end)
   end)
 end
