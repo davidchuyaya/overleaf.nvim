@@ -19,6 +19,7 @@ describe('Sioyek inverse search', function()
       serverstart = vim.fn.serverstart,
       jobstart = vim.fn.jobstart,
       show = overleaf._show_pdf,
+      system = vim.system,
     }
     config.setup({ pdf_viewer = 'sioyek', sioyek_inverse_search = true, sync_dir = false, log_level = 'error' })
     overleaf._state = { connected = true, project_id = 'project-a', documents = {} }
@@ -63,6 +64,7 @@ describe('Sioyek inverse search', function()
     config._config, project._project_tree = saved.config, saved.tree
     bridge.request, vim.fn.serverstart, vim.fn.jobstart = saved.request, saved.serverstart, saved.jobstart
     overleaf._show_pdf = saved.show
+    vim.system = saved.system
   end)
 
   local function prepare()
@@ -281,5 +283,41 @@ describe('Sioyek inverse search', function()
     vim.fn.serverstart = function() error('operation not permitted') end
     assert.is_nil(inverse.command('/tmp/My project.pdf'))
     assert.equals(3, #overleaf._viewer_command('/tmp/My project.pdf'))
+  end)
+
+  it('enables inverse search after an earlier map failure without forcing a PDF reload', function()
+    local commands, downloads = {}, 0
+    vim.system = function(_, _, callback) callback({ code = 0, stdout = 'true\n' }) end
+    vim.fn.jobstart = function(command)
+      commands[#commands + 1] = command
+      return 1
+    end
+    bridge.request = function(method, _, callback)
+      if method == 'downloadUrl' then
+        callback(nil, { path = '/tmp/My project.pdf' })
+      elseif method == 'downloadSynctex' then
+        downloads = downloads + 1
+        if downloads == 1 then
+          callback({ message = '404' })
+        else
+          callback(nil, { inputs = { './main.tex' } })
+        end
+      end
+    end
+    local outputs = { { path = 'output.pdf', url = 'https://worker.test/output.pdf' } }
+    overleaf._open_pdf(outputs)
+    assert.is_true(vim.wait(1000, function() return #commands == 1 end))
+    assert.is_false(vim.tbl_contains(commands[1], '--inverse-search'))
+    overleaf._open_pdf(outputs)
+    assert.is_true(vim.wait(1000, function() return #commands == 2 end))
+    assert.is_true(vim.tbl_contains(commands[2], '--inverse-search'))
+    assert.is_false(vim.tbl_contains(commands[2], '--execute-command'))
+    overleaf._open_pdf(outputs)
+    local done = false
+    vim.schedule(function()
+      vim.schedule(function() done = true end)
+    end)
+    assert.is_true(vim.wait(1000, function() return done end))
+    assert.equals(2, #commands)
   end)
 end)

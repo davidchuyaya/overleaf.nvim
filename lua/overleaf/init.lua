@@ -111,6 +111,12 @@ function M._show_pdf(file_path, opts)
   local sioyek = type(viewer) == 'string' and viewer:lower() == 'sioyek'
   local connection = M._pdf_state.connection or 0
   local refresh = M._pdf_state.sioyek_connection ~= connection
+  local mapping = M._pdf_state.inverse
+  local inverse_changed = require('overleaf.inverse_search').enabled()
+    and mapping
+    and mapping.ready
+    and mapping.context.pdf == file_path
+    and not vim.deep_equal(M._pdf_state.sioyek_inverse, mapping.context)
   if opts.automatic and sioyek and (M._pdf_state.sioyek_path == file_path or refresh) then
     local state, launch = M._pdf_state, M._pdf_state.launch
     if state.probe and state.probe.path == file_path then return end
@@ -129,7 +135,7 @@ function M._show_pdf(file_path, opts)
       state.probe = nil
       -- A previous session's cached document may survive a normal reopen. Do
       -- one explicit reload if the app is alive; don't reload every compile.
-      if refresh or running ~= true then
+      if refresh or inverse_changed or running ~= true then
         M._show_pdf(file_path, { reload = refresh and running ~= false, establish = true })
       end
     end)
@@ -138,7 +144,8 @@ function M._show_pdf(file_path, opts)
 
   local launch = {}
   M._pdf_state.probe = nil
-  local ok, job = pcall(vim.fn.jobstart, M._viewer_command(file_path, opts.reload), {
+  local command = M._viewer_command(file_path, opts.reload)
+  local ok, job = pcall(vim.fn.jobstart, command, {
     detach = true,
     on_exit = function(_, code)
       if code ~= 0 then
@@ -156,6 +163,7 @@ function M._show_pdf(file_path, opts)
   end
   if sioyek then
     M._pdf_state.sioyek_path = file_path
+    M._pdf_state.sioyek_inverse = vim.tbl_contains(command, '--inverse-search') and mapping and mapping.context or nil
     if opts.automatic or opts.establish then M._pdf_state.sioyek_connection = connection end
     M._pdf_state.launch = launch
   end
