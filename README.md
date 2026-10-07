@@ -253,13 +253,22 @@ require('overleaf').setup({
 })
 ```
 
-With `pdf_viewer = 'sioyek'`, the plugin opens the PDF on the first successful
-compile. If Sioyek is already running, the first compile after each connection
+With `pdf_viewer = 'sioyek'`, the plugin opens the PDF in a separate Sioyek window
+on the first successful compile. You can connect different Neovim instances to
+different projects and keep their PDFs open side by side: a new project never
+replaces another project's viewer window. PDF filenames include a stable hash
+of the Overleaf server and project ID, so projects with the same name do not
+overwrite each other's downloads (including when `pdf_dir` is shared).
+Each Neovim still connects to one Overleaf project at a time.
+
+If Sioyek is already running, the first compile after each connection
 explicitly reloads the PDF once, clearing a document cached from an older session.
 Further compiles only replace the file atomically; Sioyek's automatic
 reload handles the update without a forced cache-clearing reload or repeated
 open commands while the app is running. If you quit Sioyek, the next successful
-compile reopens it automatically. Switching to a different PDF opens that file.
+compile reopens it automatically. Switching to a different PDF opens a new window.
+Reconnecting to the same project in the same Neovim reuses its document; restarting
+Neovim opens a new window, so you can close the previous window if it is still open.
 On macOS, install the app at `/Applications/sioyek.app`; elsewhere, `sioyek`
 must be on `PATH`.
 Automatic reload still depends on Sioyek detecting the file change.

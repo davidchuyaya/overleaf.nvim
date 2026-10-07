@@ -3,7 +3,7 @@ describe('PDF viewer commands', function()
   local config = require('overleaf.config')
   local bridge = require('overleaf.bridge')
   local saved_config, saved_has, saved_request, saved_jobstart, saved_pdf_state, saved_readable
-  local saved_system
+  local saved_system, saved_state
 
   local function download_pdf(path)
     bridge.request = function(method, _, callback)
@@ -26,6 +26,8 @@ describe('PDF viewer commands', function()
     saved_pdf_state = overleaf._pdf_state
     saved_readable = vim.fn.filereadable
     saved_system = vim.system
+    saved_state = overleaf._state
+    overleaf._state = vim.deepcopy(saved_state)
     -- Default to a living viewer; tests never query or launch a real GUI app.
     vim.system = function(command, _, callback)
       callback({ code = 0, stdout = command[1] == 'tasklist' and 'sioyek.exe 123 Console' or 'true\n' })
@@ -41,6 +43,7 @@ describe('PDF viewer commands', function()
     overleaf._pdf_state = saved_pdf_state
     vim.fn.filereadable = saved_readable
     vim.system = saved_system
+    overleaf._state = saved_state
   end)
 
   it('launches the macOS Sioyek executable without clearing its render cache', function()
@@ -57,6 +60,24 @@ describe('PDF viewer commands', function()
     vim.fn.has = function(feature) return feature == 'mac' and 0 or saved_has(feature) end
     config.setup({ pdf_viewer = 'Sioyek' })
     assert.are.same({ 'sioyek', '--reuse-window', '/tmp/project.pdf' }, overleaf._viewer_command('/tmp/project.pdf'))
+  end)
+
+  it('opens a new Sioyek window without replacing another project', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local executable = vim.fn.has('mac') == 1 and '/Applications/sioyek.app/Contents/MacOS/sioyek' or 'sioyek'
+    assert.are.same(
+      { executable, '--new-window', '/tmp/project with spaces.pdf' },
+      overleaf._viewer_command('/tmp/project with spaces.pdf', false, true)
+    )
+    assert.are.same({
+      executable,
+      '--new-window',
+      '--execute-command',
+      'open_document;reload',
+      '--execute-command-data',
+      '/tmp/project with spaces.pdf',
+      '/tmp/project with spaces.pdf',
+    }, overleaf._viewer_command('/tmp/project with spaces.pdf', true, true))
   end)
 
   it('preserves custom viewer arguments without mutating the configuration', function()
@@ -84,7 +105,7 @@ describe('PDF viewer commands', function()
     assert.are.equal(0, #commands)
     complete(nil, { path = '/tmp/project.pdf' })
     assert.is_true(vim.wait(1000, function() return #commands == 1 end))
-    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[1])
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true, true), commands[1])
 
     overleaf._open_pdf({ { path = 'output.pdf', url = 'https://example.com/output.pdf' } })
     complete({ message = 'download failed' })
@@ -112,7 +133,7 @@ describe('PDF viewer commands', function()
     download_pdf('/tmp/project.pdf')
     download_pdf('/tmp/project.pdf')
     assert.are.equal(1, #commands)
-    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[1])
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true, true), commands[1])
     assert.are.equal('/tmp/project.pdf', overleaf._pdf_state.last_path)
   end)
 
@@ -252,7 +273,7 @@ describe('PDF viewer commands', function()
     download_pdf('/tmp/second.pdf')
     download_pdf('/tmp/first.pdf')
     assert.are.equal(3, #commands)
-    assert.are.same(overleaf._viewer_command('/tmp/second.pdf'), commands[2])
+    assert.are.same(overleaf._viewer_command('/tmp/second.pdf', false, true), commands[2])
   end)
 
   it('keeps opening other viewers and custom command tables on every compile', function()
@@ -279,7 +300,7 @@ describe('PDF viewer commands', function()
       return #commands
     end
     download_pdf('/tmp/project.pdf')
-    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[1])
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true, true), commands[1])
     download_pdf('/tmp/project.pdf')
     assert.are.equal(1, #commands)
   end)
@@ -308,7 +329,7 @@ describe('PDF viewer commands', function()
       return 1
     end
     download_pdf('/tmp/project.pdf')
-    assert.are.same(overleaf._viewer_command('/tmp/project.pdf'), command)
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', false, true), command)
   end)
 
   it('refreshes once even if running-app detection is unavailable', function()
@@ -320,7 +341,7 @@ describe('PDF viewer commands', function()
       return 1
     end
     download_pdf('/tmp/project.pdf')
-    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), command)
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true, true), command)
   end)
 
   it('still refreshes the first compile after manually reopening an older connection PDF', function()
@@ -369,7 +390,7 @@ describe('PDF viewer commands', function()
     assert.are.equal(0, #commands)
     probes[2]({ code = 0, stdout = 'true\n' })
     assert.is_true(vim.wait(1000, function() return #commands == 1 end))
-    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true), commands[1])
+    assert.are.same(overleaf._viewer_command('/tmp/project.pdf', true, true), commands[1])
   end)
 
   it('allows manually reopening and reloading without another download', function()
@@ -443,5 +464,60 @@ describe('PDF viewer commands', function()
     overleaf._pdf_state.last_path = '/tmp/missing.pdf'
     overleaf.view_pdf('reload')
     overleaf.view_pdf('invalid')
+  end)
+
+  it('keeps independently connected projects in separate windows without reopening on each compile', function()
+    config.setup({ pdf_viewer = 'sioyek' })
+    local commands = {}
+    vim.fn.jobstart = function(command)
+      commands[#commands + 1] = command
+      return #commands
+    end
+    local first, second = {}, {}
+    overleaf._pdf_state = first
+    download_pdf('/tmp/first.pdf')
+    overleaf._pdf_state = second
+    download_pdf('/tmp/second.pdf')
+    overleaf._pdf_state = first
+    download_pdf('/tmp/first.pdf')
+    overleaf._pdf_state = second
+    download_pdf('/tmp/second.pdf')
+    assert.equals(2, #commands)
+    assert.equals('--new-window', commands[1][2])
+    assert.equals('--new-window', commands[2][2])
+    assert.equals('/tmp/first.pdf', commands[1][#commands[1]])
+    assert.equals('/tmp/second.pdf', commands[2][#commands[2]])
+  end)
+
+  it('gives identically named projects distinct stable PDF filenames', function()
+    overleaf._state.project_name = 'Same project'
+    overleaf._state.project_id = 'first-id'
+    local first = overleaf._pdf_filename()
+    assert.equals(first, overleaf._pdf_filename())
+    overleaf._state.project_id = 'second-id'
+    local second = overleaf._pdf_filename()
+    assert.is_not.equal(first, second)
+    overleaf._state.project_id = 'first-id'
+    config.setup({ base_url = config.get().base_url .. '/' })
+    assert.equals(first, overleaf._pdf_filename())
+    config.setup({ base_url = 'https://other-overleaf.example' })
+    assert.is_not.equal(first, overleaf._pdf_filename())
+  end)
+
+  it('sanitizes PDF names and passes the project-specific name to downloads', function()
+    overleaf._state.project_name = '../A/B\\C\n project'
+    overleaf._state.project_id = 'project-id'
+    local filename = overleaf._pdf_filename()
+    assert.is_nil(filename:find('[/\\%c]'))
+    assert.equals('.pdf', filename:sub(-4))
+    config.setup({ pdf_dir = '/tmp/custom PDFs' })
+    local params
+    bridge.request = function(method, value)
+      assert.equals('downloadUrl', method)
+      params = value
+    end
+    overleaf._open_pdf({ { path = 'output.pdf', url = 'https://example.com/output.pdf' } })
+    assert.equals(filename, params.fileName)
+    assert.equals('/tmp/custom PDFs', params.outputDir)
   end)
 end)

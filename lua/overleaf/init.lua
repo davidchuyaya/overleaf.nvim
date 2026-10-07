@@ -53,8 +53,9 @@ end
 --- Build the command used to open a PDF or other downloaded file.
 ---@param file_path string
 ---@param reload? boolean explicitly refresh Sioyek
+---@param new_window? boolean keep other projects' Sioyek windows open
 ---@return string[]
-function M._viewer_command(file_path, reload)
+function M._viewer_command(file_path, reload, new_window)
   local viewer = config.get().pdf_viewer
   if type(viewer) == 'table' then
     local cmd = vim.deepcopy(viewer)
@@ -64,8 +65,16 @@ function M._viewer_command(file_path, reload)
   if type(viewer) == 'string' and viewer:lower() == 'skim' then return { 'open', '-a', 'Skim', file_path } end
   if type(viewer) == 'string' and viewer:lower() == 'sioyek' then
     local executable = vim.fn.has('mac') == 1 and '/Applications/sioyek.app/Contents/MacOS/sioyek' or 'sioyek'
-    local cmd = { executable, '--reuse-window' }
-    if reload then vim.list_extend(cmd, { '--execute-command', 'reload' }) end
+    local cmd = { executable, new_window and '--new-window' or '--reuse-window' }
+    if reload then
+      if new_window then
+        -- Sioyek executes commands before opening its positional PDF. Load the
+        -- document first so reload refreshes this PDF, not an empty new window.
+        vim.list_extend(cmd, { '--execute-command', 'open_document;reload', '--execute-command-data', file_path })
+      else
+        vim.list_extend(cmd, { '--execute-command', 'reload' })
+      end
+    end
     table.insert(cmd, file_path)
     return cmd
   end
@@ -134,8 +143,11 @@ function M._show_pdf(file_path, opts)
   end
 
   local launch = {}
+  -- Never send a new project's PDF to another Neovim's active viewer window.
+  -- Later explicit refreshes target the already-open document by its PDF path.
+  local new_window = sioyek and M._pdf_state.sioyek_path ~= file_path
   M._pdf_state.probe = nil
-  local ok, job = pcall(vim.fn.jobstart, M._viewer_command(file_path, opts.reload), {
+  local ok, job = pcall(vim.fn.jobstart, M._viewer_command(file_path, opts.reload, new_window), {
     detach = true,
     on_exit = function(_, code)
       if code ~= 0 then
@@ -1329,6 +1341,11 @@ function M.compile(mode)
   end
 
   local draft = mode == 'fast'
+  local state, pdf_state = M._state, M._pdf_state
+  local connection = pdf_state.connection or 0
+  local function current()
+    return M._state == state and M._pdf_state == pdf_state and (pdf_state.connection or 0) == connection
+  end
   config.log('info', draft and 'Compiling (fast draft)...' or 'Compiling...')
 
   bridge.request('compile', {
@@ -1337,6 +1354,8 @@ function M.compile(mode)
     projectId = M._state.project_id,
     draft = draft,
   }, function(err, result)
+    -- A slow compile must not download into a project selected in the meantime.
+    if not current() then return end
     if err then
       config.log('error', 'Compile failed: %s', err.message)
       return
@@ -1350,8 +1369,23 @@ function M.compile(mode)
       config.log('warn', 'Compile status: %s', result.status)
     end
 
-    vim.schedule(function() M._parse_compile_log(result.log or '') end)
+    vim.schedule(function()
+      if current() then M._parse_compile_log(result.log or '') end
+    end)
   end)
+end
+
+--- Stable, filesystem-safe PDF identity across Neovims and Overleaf servers.
+--- Project names alone are not unique (and can contain path separators).
+function M._pdf_filename()
+  local name = (M._state.project_name or 'output'):gsub('[^%w%-_%. ]', '_')
+  name = vim.trim(name):sub(1, 120)
+  if name == '' then name = 'output' end
+  local identity = vim.fn.sha256(vim.json.encode({
+    config.get().base_url:gsub('/+$', ''),
+    M._state.project_id or 'unconnected',
+  }))
+  return name .. '-' .. identity:sub(1, 16) .. '.pdf'
 end
 
 function M._open_pdf(output_files)
@@ -1372,7 +1406,7 @@ function M._open_pdf(output_files)
   bridge.request('downloadUrl', {
     cookie = config.get().cookie,
     url = pdf_url,
-    fileName = (M._state.project_name or 'output') .. '.pdf',
+    fileName = M._pdf_filename(),
     outputDir = config.get().pdf_dir,
   }, function(err, result)
     if not current() then return end

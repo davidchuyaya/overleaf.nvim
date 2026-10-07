@@ -81,11 +81,16 @@ describe('overleaf compile modes', function()
   local original_config
   local original_request
   local original_state
+  local original_pdf_state, original_open_pdf, original_parse_log
 
   before_each(function()
     original_config = vim.deepcopy(config._config)
     original_request = bridge.request
     original_state = vim.deepcopy(overleaf._state)
+    original_pdf_state = overleaf._pdf_state
+    original_open_pdf = overleaf._open_pdf
+    original_parse_log = overleaf._parse_compile_log
+    overleaf._pdf_state = {}
     overleaf._state.connected = true
     overleaf._state.project_id = 'project-id'
     overleaf._state.csrf_token = 'csrf-token'
@@ -95,6 +100,9 @@ describe('overleaf compile modes', function()
     config._config = original_config
     bridge.request = original_request
     overleaf._state = original_state
+    overleaf._pdf_state = original_pdf_state
+    overleaf._open_pdf = original_open_pdf
+    overleaf._parse_compile_log = original_parse_log
   end)
 
   it('passes fast draft mode to the bridge', function()
@@ -115,5 +123,23 @@ describe('overleaf compile modes', function()
 
     assert.are.equal('compile', request.method)
     assert.is_false(request.params.draft)
+  end)
+
+  it('does not publish a delayed compile into a newly connected project', function()
+    local complete
+    bridge.request = function(method, params, callback)
+      assert.equals('compile', method)
+      assert.equals('project-id', params.projectId)
+      complete = callback
+    end
+    overleaf._open_pdf = function() error('Stale compile must not download a PDF') end
+    overleaf._parse_compile_log = function() error('Stale compile must not replace diagnostics') end
+    overleaf.compile()
+    overleaf._state.project_id = 'other-project'
+    overleaf._reset_pdf_connection()
+    complete(nil, { status = 'success', outputFiles = {}, log = 'old project log' })
+    local done = false
+    vim.schedule(function() done = true end)
+    assert.is_true(vim.wait(1000, function() return done end))
   end)
 end)
