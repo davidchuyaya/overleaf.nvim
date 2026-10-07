@@ -232,7 +232,6 @@ const handlers = {
             });
           });
         });
-        req.setTimeout(15000, () => req.destroy(new Error('Output download timed out')));
         req.on('error', (err) => {
           cleanup();
           reject(err);
@@ -243,10 +242,6 @@ const handlers = {
     });
 
     return { path: tmpPath };
-  },
-
-  async downloadSynctex(params) {
-    return require('./synctex').download(params, value => handlers.downloadUrl(value));
   },
 
   async downloadFile(params) {

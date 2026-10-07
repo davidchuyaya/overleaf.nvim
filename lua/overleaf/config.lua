@@ -7,7 +7,6 @@ M._config = {
   base_url = 'https://www.overleaf.com', -- Overleaf instance URL (for self-hosted)
   pdf_viewer = nil, -- Viewer command; 'skim' or 'sioyek' enable app-specific integration
   pdf_dir = nil, -- PDF output directory (nil = system temp dir)
-  sioyek_inverse_search = true, -- Jump from the compiled PDF to live Overleaf source buffers
   compile_on_write = true, -- Compile when an Overleaf buffer is written
   tree_provider = 'native', -- File tree: 'native' or 'neo-tree'
   explorer_key = '<leader>e', -- Neo-tree shortcut, scoped to Overleaf while connected
